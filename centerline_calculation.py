@@ -40,10 +40,15 @@ def centerline_calculation(niftidir, niftiname, niftiroot, niftiname_intersect):
     mypype = pypes.PypeRun(myargs)
 
 
+    surface_centerline_sampling = surface + '_centerline_sampling.vtp'
+    myargs = 'vmtklineresampling -ifile ' + surface_centerline + ' -ofile ' + surface_centerline_sampling
+    mypype = pypes.PypeRun(myargs)
+
+
     myargs = 'vmtksurfacereader -ifile ' + surface_clip + ' --pipe ' + \
              'vmtkrenderer --pipe ' + \
              'vmtksurfaceviewer -opacity 0.25' + ' --pipe ' + \
-             'vmtksurfaceviewer -ifile ' + surface_centerline + ' -array MaximumInscribedSphereRadius'
+             'vmtksurfaceviewer -ifile ' + surface_centerline_sampling + ' -array MaximumInscribedSphereRadius'
 
     mypype = pypes.PypeRun(myargs)
 
@@ -51,7 +56,7 @@ def centerline_calculation(niftidir, niftiname, niftiroot, niftiname_intersect):
     # export senterline coordinates
 
     centerlineReader = vmtkscripts.vmtkSurfaceReader()
-    centerlineReader.InputFileName = surface_centerline
+    centerlineReader.InputFileName = surface_centerline_sampling
     centerlineReader.Execute()
 
     clNumpyAdaptor = vmtkscripts.vmtkCenterlinesToNumpy()
@@ -102,33 +107,55 @@ def centerline_calculation(niftidir, niftiname, niftiroot, niftiname_intersect):
     return csv_file
 
 
-def csv_to_nifti(niftidir, size_data, csv_file):
+def endpoint_calculation(niftidir, size_data, csv_file):
 
     import pandas as pd
 
-    centerline = np.zeros(size_data)
+    centerlines = np.zeros(size_data)
+    endpoints = np.zeros(size_data)
 
     filename1 = os.path.join(niftidir, csv_file)
     df = pd.read_csv(filename1)
-    print(df)
+    df_numpy = np.round(df.to_numpy().astype(np.int32))
 
     for i in range(df.values.shape[0]):
-        x = round(df.values[i, 0]).astype(np.int32)
-        y = round(df.values[i, 1]).astype(np.int32)
-        z = round(df.values[i, 2]).astype(np.int32)
-        label = round(df.values[i, 3]).astype(np.int32)
-        centerline[x, y, z] = label
+        x = df_numpy[i, 0]
+        y = df_numpy[i, 1]
+        z = df_numpy[i, 2]
+        label = df_numpy[i, 3]
+        centerlines[x, y, z] = label
 
-    kernel = ball(3)
-    dilated_centerline = centerline
+    # endpoint candidates
+    index_endp_candidate = []
     for i in range(label):
-        mask = centerline == (i + 1)
-        mask = binary_dilation(mask, kernel)
-        dilated_centerline = np.where(mask > 0, i + 1, dilated_centerline)
+        index = np.argwhere(df_numpy[:, 3] == i + 1)
+        index_endp_candidate = np.append(index_endp_candidate, index[0], axis=0)
+        index_endp_candidate = np.append(index_endp_candidate, index[-1], axis=0)
 
-    points = dilated_centerline
+    labels = np.arange(label)
+    labels = labels + 1
 
-    return points
+    # endpoints estimation
+    for i in range(np.shape(index_endp_candidate)[0]):
+
+        index = index_endp_candidate[i].astype(np.int32)
+
+        x = df_numpy[index, 0]
+        y = df_numpy[index, 1]
+        z = df_numpy[index, 2]
+        label = df_numpy[index, 3]
+
+        patch = centerlines[x - 1:x + 2, y - 1:y + 2, z - 1:z + 2]
+        other_label = np.delete(labels, label - 1)
+
+        endpoint_or_not = np.isin(patch, other_label)
+        if True in endpoint_or_not:
+            pass
+        else:
+            endpoints[x, y, z] = 1
+
+    return endpoints
+
 
 
 def main():
@@ -200,14 +227,14 @@ def main():
     csv_file_R = centerline_calculation(niftidir, niftiname_R, niftiroot_R, intersect_R)
 
 
-    points = csv_to_nifti(niftidir, np.shape(coronary), csv_file_L)
+    endpoints = endpoint_calculation(niftidir, np.shape(coronary), csv_file_L)
     centerline_name = 'centreline_' + niftiroot_L + '.nii.gz'
-    mask = nib.Nifti1Image(points, img1.affine, img1.header)
+    mask = nib.Nifti1Image(endpoints, img1.affine, img1.header)
     nib.save(mask, os.path.join(niftidir, centerline_name))
 
-    points = csv_to_nifti(niftidir, np.shape(coronary), csv_file_R)
+    endpoints = endpoint_calculation(niftidir, np.shape(coronary), csv_file_R)
     centerline_name = 'centreline_' + niftiroot_R + '.nii.gz'
-    mask = nib.Nifti1Image(points, img1.affine, img1.header)
+    mask = nib.Nifti1Image(endpoints, img1.affine, img1.header)
     nib.save(mask, os.path.join(niftidir, centerline_name))
 
 

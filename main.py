@@ -7,7 +7,8 @@ from vmtk import vmtkscripts
 import numpy as np
 import nibabel as nib
 import pandas as pd
-from skimage.morphology import ball, binary_dilation
+from scipy.ndimage import convolve
+from skimage.morphology import ball, binary_dilation, max_tree_local_maxima
 from coreutils import get_imagepath, get_dirname, get_filename, get_fileroot
 # import matplotlib.pyplot as plt
 # ----------------------------------------------------------------------------------------------------------------------
@@ -36,10 +37,27 @@ from coreutils import get_imagepath, get_dirname, get_filename, get_fileroot
 
 niftidir = r'D:\Mojtaba\Dataset_test\9'
 os.chdir(niftidir)
-niftiname = 'R_coronary.nii.gz'
-niftiroot = 'R_coronary'
+niftiname = 'L_coronary.nii.gz'
+niftiroot = 'L_coronary'
 
-initial_surface = 'aorta_R_intersect.nii.gz'
+initial_surface = 'L_coronary_intersect1.nii.gz'
+
+initial_surface1 = 'L_coronary_intersect.nii.gz'
+filename1 = os.path.join(niftidir, initial_surface1)
+img1 = nib.load(filename1)
+intersect = img1.get_fdata()
+
+initial_surface1 = 'L_coronary_intersect.nii.gz'
+filename1 = os.path.join(niftidir, initial_surface1)
+img1 = nib.load(filename1)
+intersect = img1.get_fdata()
+
+slice_index = np.argwhere(intersect == 1)
+final = np.zeros(np.shape(intersect))
+final[:, :, slice_index[0, 2]] = intersect[:, :, slice_index[0, 2]]
+
+mask = nib.Nifti1Image(final, img1.affine, img1.header)
+nib.save(mask, os.path.join(niftidir, initial_surface))
 
 # automatically centerline calculation
 myargs = 'vmtkmarchingcubes -ifile ' + niftiname + ' -l 1.0 -ofile vessel_aorta_surface.vtp ' \
@@ -75,16 +93,20 @@ myargs = 'vmtknetworkextraction -ifile vessel_aorta_surface_clip.vtp -ofile vess
           # '-ographfile output_graph.vtp '
 mypype = pypes.PypeRun(myargs)
 
+myargs = 'vmtklineresampling -ifile vessel_aorta_centerline.vtp -ofile vessel_aorta_centerline1.vtp -length 0.1'
+mypype = pypes.PypeRun(myargs)
+
+
 # myargs = 'vmtksurfaceviewer -ifile output_graph.vtp '
 # mypype = pypes.PypeRun(myargs)
 
-myargs = 'vmtksurfaceviewer -ifile vessel_aorta_centerline.vtp '
+myargs = 'vmtksurfaceviewer -ifile vessel_aorta_centerline1.vtp '
 mypype = pypes.PypeRun(myargs)
 
 myargs = 'vmtksurfacereader -ifile vessel_aorta_surface_clip.vtp --pipe ' + \
          'vmtkrenderer --pipe ' + \
          'vmtksurfaceviewer -opacity 0.25' + ' --pipe ' + \
-         'vmtksurfaceviewer -ifile vessel_aorta_centerline.vtp -array MaximumInscribedSphereRadius'
+         'vmtksurfaceviewer -ifile vessel_aorta_centerline1.vtp -array MaximumInscribedSphereRadius'
 
 mypype = pypes.PypeRun(myargs)
 
@@ -92,7 +114,7 @@ mypype = pypes.PypeRun(myargs)
 # ----------------------------------------------------------------------------------------------------------------------
 # EXPORT CENTRELINE COORDINATES
 # ----------------------------------------------------------------------------------------------------------------------
-centreline_file = 'vessel_aorta_centerline.vtp'
+centreline_file = 'vessel_aorta_centerline1.vtp'
 
 
 centerlineReader = vmtkscripts.vmtkSurfaceReader()
@@ -157,29 +179,79 @@ df = pd.read_csv(filename2)
 print(df)
 
 centerline = np.zeros(np.shape(data1))
+df_numpy = np.round(df.to_numpy().astype(np.int32))
 
 for i in range(df.values.shape[0]):
-    x = round(df.values[i, 0]).astype(np.int32)
-    y = round(df.values[i, 1]).astype(np.int32)
-    z = round(df.values[i, 2]).astype(np.int32)
-    label = round(df.values[i, 3]).astype(np.int32)
+    x = df_numpy[i, 0]
+    y = df_numpy[i, 1]
+    z = df_numpy[i, 2]
+    label = df_numpy[i, 3]
     centerline[x, y, z] = label
 
-kernel = ball(3)
-dilated_centerline = centerline
+
+# endpoint candidates
+index_endp_candidate = []
 for i in range(label):
-# for i in range(14):
-    mask = centerline == (i+1)
-    mask = binary_dilation(mask, kernel)
-    dilated_centerline = np.where(mask > 0, i+1, dilated_centerline)
+    index = np.argwhere(df_numpy[:, 3] == i+1)
+    index_endp_candidate = np.append(index_endp_candidate, index[0], axis=0)
+    index_endp_candidate = np.append(index_endp_candidate, index[-1], axis=0)
 
-final = dilated_centerline
+labels = np.arange(label)
+labels = labels + 1
+
+endpoints = np.zeros(np.shape(data1))
+
+for i in range(np.shape(index_endp_candidate)[0]):
+
+    index = index_endp_candidate[i].astype(np.int32)
+
+    x = df_numpy[index, 0]
+    y = df_numpy[index, 1]
+    z = df_numpy[index, 2]
+    label = df_numpy[index, 3]
+
+    patch = centerline[x-1:x+2, y-1:y+2, z-1:z+2]
+    other_label = np.delete(labels, label-1)
+
+    endpoint_or_not = np.isin(patch, other_label)
+    if True in endpoint_or_not:
+        pass
+    else:
+        endpoints[x, y, z] = 1
 
 
+a=1
+# kernel = ball(3)
+# dilated_centerline = centerline
+# for i in range(label):
+# # for i in range(14):
+#     mask = centerline == (i+1)
+#     mask = binary_dilation(mask, kernel)
+#     dilated_centerline = np.where(mask > 0, i+1, dilated_centerline)
+
+
+final = centerline
 
 centerline_name = 'centreline_' + niftiroot + '.nii.gz'
 mask = nib.Nifti1Image(final, img1.affine, img1.header)
 nib.save(mask, os.path.join(niftidir, centerline_name))
+
+# kernel = np.array([[[1, 1, 1], [1, 1, 1], [1, 1, 1]],
+#                    [[1, 1, 1], [1, 1, 1], [1, 1, 1]],
+#                   [[1, 1, 1], [1, 1, 1], [1, 1, 1]]])
+# kernel = ball(1)
+# convol = convolve(centerline, kernel, mode='constant', cval=0.0)
+
+kernel = ball(2)
+endpoints_dilated = binary_dilation(endpoints, kernel)
+final = endpoints_dilated
+
+centerline_name = 'endpoint_' + niftiroot + '.nii.gz'
+mask = nib.Nifti1Image(final, img1.affine, img1.header)
+nib.save(mask, os.path.join(niftidir, centerline_name))
+
+
+# start point and endpoint selection
 
 
 
