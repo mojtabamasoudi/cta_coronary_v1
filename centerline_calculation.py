@@ -207,7 +207,21 @@ def main():
     # Left side
 
     intersect = dilated_left_cor * dilated_aorta
-    mask = nib.Nifti1Image(intersect, img1.affine, img1.header)
+
+    slice_index = np.argwhere(intersect == 1)
+    two_surface = np.zeros(np.shape(intersect))
+    x = slice_index[0, 0]
+    y = slice_index[0, 1]
+    z = slice_index[0, 2]
+
+    kernel = np.array([[[1, 1, 1], [1, 1, 1], [1, 1, 1]],
+                       [[1, 1, 1], [1, 1, 1], [1, 1, 1]],
+                       [[1, 1, 1], [1, 1, 1], [1, 1, 1]]])
+
+    two_surface[x - 1:x + 2, y - 1:y + 2, z - 1:z + 2] = kernel
+    two_surface[x - 1:x + 2, y - 1:y + 2, z:z + 3] = kernel
+
+    mask = nib.Nifti1Image(two_surface, img1.affine, img1.header)
 
     intersect_L = niftiroot_L +'_intersect.nii.gz'
     nib.save(mask, os.path.join(niftidir, intersect_L))
@@ -215,7 +229,17 @@ def main():
     # Right side
 
     intersect = dilated_right_cor * dilated_aorta
-    mask = nib.Nifti1Image(intersect, img1.affine, img1.header)
+
+    slice_index = np.argwhere(intersect == 1)
+    two_surface = np.zeros(np.shape(intersect))
+    x = slice_index[0, 0]
+    y = slice_index[0, 1]
+    z = slice_index[0, 2]
+
+    two_surface[x - 1:x + 2, y - 1:y + 2, z - 1:z + 2] = kernel
+    two_surface[x - 1:x + 2, y - 1:y + 2, z:z + 3] = kernel
+
+    mask = nib.Nifti1Image(two_surface, img1.affine, img1.header)
 
     intersect_R = niftiroot_R +'_intersect.nii.gz'
     nib.save(mask, os.path.join(niftidir, intersect_R))
@@ -228,12 +252,12 @@ def main():
 
 
     endpoints = endpoint_calculation(niftidir, np.shape(coronary), csv_file_L)
-    centerline_name = 'centreline_' + niftiroot_L + '.nii.gz'
+    centerline_name = 'endpoints_' + niftiroot_L + '.nii.gz'
     mask = nib.Nifti1Image(endpoints, img1.affine, img1.header)
     nib.save(mask, os.path.join(niftidir, centerline_name))
 
     endpoints = endpoint_calculation(niftidir, np.shape(coronary), csv_file_R)
-    centerline_name = 'centreline_' + niftiroot_R + '.nii.gz'
+    centerline_name = 'endpoints_' + niftiroot_R + '.nii.gz'
     mask = nib.Nifti1Image(endpoints, img1.affine, img1.header)
     nib.save(mask, os.path.join(niftidir, centerline_name))
 

@@ -40,24 +40,7 @@ os.chdir(niftidir)
 niftiname = 'L_coronary.nii.gz'
 niftiroot = 'L_coronary'
 
-initial_surface = 'L_coronary_intersect1.nii.gz'
-
-initial_surface1 = 'L_coronary_intersect.nii.gz'
-filename1 = os.path.join(niftidir, initial_surface1)
-img1 = nib.load(filename1)
-intersect = img1.get_fdata()
-
-initial_surface1 = 'L_coronary_intersect.nii.gz'
-filename1 = os.path.join(niftidir, initial_surface1)
-img1 = nib.load(filename1)
-intersect = img1.get_fdata()
-
-slice_index = np.argwhere(intersect == 1)
-final = np.zeros(np.shape(intersect))
-final[:, :, slice_index[0, 2]] = intersect[:, :, slice_index[0, 2]]
-
-mask = nib.Nifti1Image(final, img1.affine, img1.header)
-nib.save(mask, os.path.join(niftidir, initial_surface))
+initial_surface = 'L_coronary_intersect.nii.gz'
 
 # automatically centerline calculation
 myargs = 'vmtkmarchingcubes -ifile ' + niftiname + ' -l 1.0 -ofile vessel_aorta_surface.vtp ' \
