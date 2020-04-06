@@ -153,8 +153,6 @@ initial_surface = 'L_coronary_intersect.nii.gz'
 csv_file = 'centreline_' + niftiroot + '.csv'
 # np.savetxt(csv_file, points_ijk, delimiter=",")
 
-# branch labeling
-#  1. removing repetitive points for each label
 
 
 
@@ -251,19 +249,64 @@ for i in range(np.shape(index_endp_candidate)[0]):
         endpoints[x, y, z] = 1
 
 
-# distance to aorta
-# TODO
+# calculate distance of candidate points from aorta
 start_end = np.reshape(start_end, [label*2, 4])
 
 filename1 = os.path.join(niftidir, initial_surface)
 img1 = nib.load(filename1)
 data1 = img1.get_fdata()
 
-slice_index = np.argwhere(data1 == 1)
+slice_index = np.argwhere(data1 > 0)
 x = slice_index[0, 0]
 y = slice_index[0, 1]
 z = slice_index[0, 2]
-distance_from_aorta = np.power(())
+
+# euclidean distance
+distance_thresh = 30
+aa = np.array([x, y, z])
+bb = start_end[:, 0:3] - aa
+cc = np.power(bb, 2)
+dd = np.sum(cc, axis=1)
+ee = np.sqrt(dd)
+ff = ee[::2]
+
+labels_near_aorta = np.argwhere(ff < distance_thresh)  # these labels should be join together as proxiaml branch close to aorta
+arg = np.argmax(ee[(labels_near_aorta*2)+1])
+labels_proximal = labels_near_aorta[arg]  # this label considered as main label close to aorta
+
+# branch labeling left
+STRUCT = {
+    'Left main': -1,
+    'Proximal LAD': -1,
+    'Mid LAD': -1,
+    'Distal LAD': -1,
+    'First Diagonal': -1,
+    'Second Diagonal': -1,
+    'Proximal LCX': -1,
+    'First marginal': -1,
+    'Mid-distal LCX': -1,
+    'Posterolateral branch': -1,
+    'Left PDA': -1,
+}
+
+STRUCT['Proximal LAD'] = [labels_near_aorta + 1]
+indx = np.argwhere(df_numpy[:, 3] == labels_proximal+1)
+mean_x_proximal = np.mean(df_numpy[indx, 1])
+
+neighbour = np.argwhere(co_occurrence[labels_proximal+1, :] == 1)
+
+for i in range(np.shape(neighbour)[0]):
+    label = neighbour[i, 1]
+    indx = np.argwhere(df_numpy[:, 3] == label)
+    mean_x = np.mean(df_numpy[indx, 1])
+    if mean_x >= mean_x_proximal:
+        STRUCT['Proximal LAD'] = label
+    else:
+        STRUCT['Proximal LCX'] = label
+
+
+
+
 
 a=1
 # kernel = ball(3)
