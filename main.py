@@ -7,6 +7,7 @@ from vmtk import vmtkscripts
 import numpy as np
 import nibabel as nib
 import pandas as pd
+import math
 from scipy.ndimage import convolve
 from skimage.morphology import ball, binary_dilation, max_tree_local_maxima
 from coreutils import get_imagepath, get_dirname, get_filename, get_fileroot
@@ -35,14 +36,24 @@ from coreutils import get_imagepath, get_dirname, get_filename, get_fileroot
 # cwd = os.getcwd()
 # os.chdir(niftidir)
 
+from math import *
 
+def angle_trunc(a):
+    while a < 0.0:
+        a += pi * 2
+    return a
+
+def getAngleBetweenPoints(x_orig, y_orig, x_landmark, y_landmark):
+    deltaY = y_landmark - y_orig
+    deltaX = x_landmark - x_orig
+    return angle_trunc(atan2(deltaY, deltaX))
 
 niftidir = r'D:\Mojtaba\Dataset_test\9'
 os.chdir(niftidir)
-niftiname = 'L_coronary.nii.gz'
-niftiroot = 'L_coronary'
+niftiname = 'R_coronary.nii.gz'
+niftiroot = 'R_coronary'
 
-initial_surface = 'L_coronary_intersect.nii.gz'
+initial_surface = 'R_coronary_intersect.nii.gz'
 
 # # automatically centerline calculation
 # myargs = 'vmtkmarchingcubes -ifile ' + niftiname + ' -l 1.0 -ofile vessel_aorta_surface.vtp ' \
@@ -197,33 +208,11 @@ for i in range(label):
 labels = np.arange(label)
 labels = labels + 1
 
-
-# co-occurrence matrix between branches
-
-co_occurrence = np.zeros([label+1, label+1])
-patch_size = 2
-for i in range(label):
-
-    index = index_endp_candidate[(i*2)+1].astype(np.int32)
-    x = df_numpy[index, 0]
-    y = df_numpy[index, 1]
-    z = df_numpy[index, 2]
-    label = df_numpy[index, 3]
-
-    patch = centerline[x-patch_size:x+(patch_size+1),
-            y-patch_size:y+(patch_size+1),
-            z-1:z+2]
-    other_label = np.delete(labels, label-1)
-
-    neighbour_label = np.isin(other_label, patch)
-    a = np.where(neighbour_label == True)
-    b = other_label[a]
-    co_occurrence[label, b] = 1
-
 # endpoint estimation
 endpoints = np.zeros(np.shape(data1))
 patch_size = 1
 start_end = []
+endpoints_list = []
 
 for i in range(np.shape(index_endp_candidate)[0]):
 
@@ -247,6 +236,51 @@ for i in range(np.shape(index_endp_candidate)[0]):
         pass
     else:
         endpoints[x, y, z] = 1
+        endpoints_list = np.append(endpoints_list, df_numpy[index, :])
+
+
+endpoint_size = np.size(endpoints_list)
+endpoint_size = int(endpoint_size/4)
+endpoints_list = np.reshape(endpoints_list, [endpoint_size, 4])
+
+
+# kernel = ball(2)
+# endpoints_dilated = binary_dilation(endpoints, kernel)
+# final = endpoints_dilated
+#
+# centerline_name = 'endpoint_' + niftiroot + '.nii.gz'
+# mask = nib.Nifti1Image(final, img1.affine, img1.header)
+# nib.save(mask, os.path.join(niftidir, centerline_name))
+
+
+# co-occurrence matrix between branches
+
+label = np.max(df_numpy[:, 3])
+
+co_occurrence = np.zeros([label+1, label+1])
+co_occurrence_inverse = np.zeros([label+1, label+1])
+
+patch_size = 2
+for j in range(2):
+    for i in range(label):
+        index = index_endp_candidate[(i*2)+(1*j)].astype(np.int32)
+        x = df_numpy[index, 0]
+        y = df_numpy[index, 1]
+        z = df_numpy[index, 2]
+        label = df_numpy[index, 3]
+
+        patch = centerline[x-patch_size:x+(patch_size+1),
+                y-patch_size:y+(patch_size+1),
+                z-1:z+2]
+        other_label = np.delete(labels, label-1)
+
+        neighbour_label = np.isin(other_label, patch)
+        a = np.where(neighbour_label == True)
+        b = other_label[a]
+        if j == 0:  # sometimes centerlines are inverse order. if top-to-down j =1, else j = 0
+            co_occurrence_inverse[label, b] = 1
+        else:
+            co_occurrence[label, b] = 1
 
 
 # calculate distance of candidate points from aorta
@@ -268,11 +302,240 @@ bb = start_end[:, 0:3] - aa
 cc = np.power(bb, 2)
 dd = np.sum(cc, axis=1)
 ee = np.sqrt(dd)
-ff = ee[::2]
 
-labels_near_aorta = np.argwhere(ff < distance_thresh)  # these labels should be join together as proxiaml branch close to aorta
-arg = np.argmax(ee[(labels_near_aorta*2)+1])
-labels_proximal = labels_near_aorta[arg]  # this label considered as main label close to aorta
+ff = np.argwhere(ee < distance_thresh)
+ff = np.floor(ff/2)
+labels_near_aorta = np.unique(ff)  # these labels should be join together as proxiaml branch close to aorta
+labels_near_aorta = (labels_near_aorta).astype('int32')
+
+# extracting main label and checking whether is not endpoint
+flag = -1
+labels_near_aorta_temp = labels_near_aorta
+endpoints_label = endpoints_list[:, 3] - 1
+while flag == -1:
+    arg1 = np.argmax(ee[(labels_near_aorta_temp*2)+1])
+    value1 = np.max(ee[(labels_near_aorta_temp*2)+1])
+
+    arg2 = np.argmax(ee[(labels_near_aorta_temp*2)])
+    value2 = np.max(ee[(labels_near_aorta_temp*2)])
+
+    if value1 >= value2:
+        arg = arg1
+    else:
+        arg = arg2
+
+    label_proximal = labels_near_aorta_temp[arg]  # this label considered as main label close to aorta
+    endpoint_or_not = np.isin(label_proximal, endpoints_label)
+    if True in endpoint_or_not:
+        labels_near_aorta_temp = labels_near_aorta_temp[labels_near_aorta_temp != label_proximal]
+    else:
+        flag = 1
+
+
+
+# branch labeling right
+STRUCT = {
+    'Proximal RCA': -1,
+    'Mid RCA': -1,
+    'Distal RCA': -1,
+    'Right PDA': -1,
+    'V': -1,
+    'AM': -1,
+    'RPD': -1,
+}
+
+# level 1
+STRUCT['Proximal RCA'] = [labels_near_aorta + 1]
+previous_z = z
+
+# level 2
+degree_angle = 40
+
+if STRUCT['Proximal RCA'] != -1:
+    label = label_proximal + 1
+    indx = np.argwhere(df_numpy[:, 3] == label)
+
+    start_x_proximal = df_numpy[indx[0], 0]
+    start_y_proximal = df_numpy[indx[0], 1]
+    start_z_proximal = df_numpy[indx[0], 2]
+
+    end_x_proximal = df_numpy[indx[-1], 0]
+    end_y_proximal = df_numpy[indx[-1], 1]
+    end_z_proximal = df_numpy[indx[-1], 2]
+
+    # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+    deltaY = end_y_proximal - start_y_proximal
+    deltaX = end_x_proximal - start_x_proximal
+    proximal_angle = atan2(deltaY, deltaX) * 180 / pi
+
+    if (np.abs(end_z_proximal - previous_z) >= np.abs(start_z_proximal - previous_z)):
+        neighbour = np.argwhere(co_occurrence[label, :] == 1)
+        previous_z = end_z_proximal
+    else:
+        neighbour = np.argwhere(co_occurrence_inverse[label, :] == 1)
+        previous_z = start_z_proximal
+
+    num_neighbour = np.shape(neighbour)[0]
+    angle_matrix = np.zeros([num_neighbour, 2])
+
+    for i in range(num_neighbour):
+        label = neighbour[i]
+        label = label[0]
+        indx = np.argwhere(df_numpy[:, 3] == label)
+
+        start_x_proximal = df_numpy[indx[0], 0]
+        start_y_proximal = df_numpy[indx[0], 1]
+
+        end_x_proximal = df_numpy[indx[-1], 0]
+        end_y_proximal = df_numpy[indx[-1], 1]
+
+        # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+        deltaY = end_y_proximal - start_y_proximal
+        deltaX = end_x_proximal - start_x_proximal
+        angle = atan2(deltaY, deltaX) * 180 / pi
+
+        diff_angle = np.abs(proximal_angle - angle)
+
+        angle_matrix[i, 0] = diff_angle
+        angle_matrix[i, 1] = label
+
+        if diff_angle <= degree_angle:
+            STRUCT['Mid RCA'] = label
+        else:
+            STRUCT['V'] = label
+
+    index = np.argsort(angle_matrix[:, 0], axis=0)
+
+    if num_neighbour == 2 and (STRUCT['Mid RCA'] == -1 or STRUCT['V'] == -1):
+        STRUCT['Mid RCA'] = angle_matrix[index[0], 1].astype('int64')
+        STRUCT['V'] = angle_matrix[index[1], 1].astype('int64')
+
+# level 3
+degree_angle = 40
+
+if STRUCT['Mid RCA'] != -1:
+    label = STRUCT['Mid RCA']
+    indx = np.argwhere(df_numpy[:, 3] == label)
+
+    start_x_proximal = df_numpy[indx[0], 0]
+    start_y_proximal = df_numpy[indx[0], 1]
+    start_z_proximal = df_numpy[indx[0], 2]
+
+    end_x_proximal = df_numpy[indx[-1], 0]
+    end_y_proximal = df_numpy[indx[-1], 1]
+    end_z_proximal = df_numpy[indx[-1], 2]
+
+    # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+    deltaY = end_y_proximal - start_y_proximal
+    deltaX = end_x_proximal - start_x_proximal
+    proximal_angle = atan2(deltaY, deltaX) * 180 / pi
+
+    if (np.abs(end_z_proximal - previous_z) >= np.abs(start_z_proximal - previous_z)):
+        neighbour = np.argwhere(co_occurrence[label, :] == 1)
+        previous_z = end_z_proximal
+    else:
+        neighbour = np.argwhere(co_occurrence_inverse[label, :] == 1)
+        previous_z = start_z_proximal
+
+    num_neighbour = np.shape(neighbour)[0]
+    angle_matrix = np.zeros([num_neighbour, 2])
+
+    for i in range(num_neighbour):
+        label = neighbour[i]
+        label = label[0]
+        indx = np.argwhere(df_numpy[:, 3] == label)
+
+        start_x_proximal = df_numpy[indx[0], 0]
+        start_y_proximal = df_numpy[indx[0], 1]
+
+        end_x_proximal = df_numpy[indx[-1], 0]
+        end_y_proximal = df_numpy[indx[-1], 1]
+
+        # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+        deltaY = end_y_proximal - start_y_proximal
+        deltaX = end_x_proximal - start_x_proximal
+        angle = atan2(deltaY, deltaX) * 180 / pi
+
+        diff_angle = np.abs(proximal_angle - angle)
+
+        angle_matrix[i, 0] = diff_angle
+        angle_matrix[i, 1] = label
+
+        if diff_angle <= degree_angle:
+            STRUCT['AM'] = label
+        else:
+            STRUCT['Distal RCA'] = label
+
+    index = np.argsort(angle_matrix[:, 0], axis=0)
+
+    if num_neighbour == 2 and (STRUCT['AM'] == -1 or STRUCT['Distal RCA'] == -1):
+        STRUCT['AM'] = angle_matrix[index[0], 1].astype('int64')
+        STRUCT['Distal RCA'] = angle_matrix[index[1], 1].astype('int64')
+
+
+# level 4
+degree_angle = 40
+
+if STRUCT['Distal RCA'] != -1:
+    label = STRUCT['Distal RCA']
+    indx = np.argwhere(df_numpy[:, 3] == label)
+
+    start_x_proximal = df_numpy[indx[0], 0]
+    start_y_proximal = df_numpy[indx[0], 1]
+    start_z_proximal = df_numpy[indx[0], 2]
+
+    end_x_proximal = df_numpy[indx[-1], 0]
+    end_y_proximal = df_numpy[indx[-1], 1]
+    end_z_proximal = df_numpy[indx[-1], 2]
+
+    # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+    deltaY = end_y_proximal - start_y_proximal
+    deltaX = end_x_proximal - start_x_proximal
+    proximal_angle = atan2(deltaY, deltaX) * 180 / pi
+
+    if (np.abs(end_z_proximal - previous_z) >= np.abs(start_z_proximal - previous_z)):
+        neighbour = np.argwhere(co_occurrence[label, :] == 1)
+        previous_z = end_z_proximal
+    else:
+        neighbour = np.argwhere(co_occurrence_inverse[label, :] == 1)
+        previous_z = start_z_proximal
+
+    num_neighbour = np.shape(neighbour)[0]
+    angle_matrix = np.zeros([num_neighbour, 2])
+
+    for i in range(num_neighbour):
+        label = neighbour[i]
+        label = label[0]
+        indx = np.argwhere(df_numpy[:, 3] == label)
+
+        start_x_proximal = df_numpy[indx[0], 0]
+        start_y_proximal = df_numpy[indx[0], 1]
+
+        end_x_proximal = df_numpy[indx[-1], 0]
+        end_y_proximal = df_numpy[indx[-1], 1]
+
+        # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+        deltaY = end_y_proximal - start_y_proximal
+        deltaX = end_x_proximal - start_x_proximal
+        angle = atan2(deltaY, deltaX) * 180 / pi
+
+        diff_angle = np.abs(proximal_angle - angle)
+
+        angle_matrix[i, 0] = diff_angle
+        angle_matrix[i, 1] = label
+
+        if diff_angle <= degree_angle:
+            STRUCT['Right PDA'] = label
+        else:
+            STRUCT['RPD'] = label
+
+    index = np.argsort(angle_matrix[:, 0], axis=0)
+
+    if num_neighbour == 2 and (STRUCT['Right PDA'] == -1 or STRUCT['RPD'] == -1):
+        STRUCT['Right PDA'] = angle_matrix[index[0], 1].astype('int64')
+        STRUCT['RPD'] = angle_matrix[index[1], 1].astype('int64')
+
+print(STRUCT)
 
 # branch labeling left
 STRUCT = {
@@ -289,23 +552,230 @@ STRUCT = {
     'Left PDA': -1,
 }
 
-STRUCT['Proximal LAD'] = [labels_near_aorta + 1]
-indx = np.argwhere(df_numpy[:, 3] == labels_proximal+1)
-mean_x_proximal = np.mean(df_numpy[indx, 1])
+# level 1
+STRUCT['Left main'] = [labels_near_aorta + 1]
 
-neighbour = np.argwhere(co_occurrence[labels_proximal+1, :] == 1)
+# level 2
+degree_angle = 40
 
-for i in range(np.shape(neighbour)[0]):
-    label = neighbour[i, 1]
+if STRUCT['Left main'] != -1:
+    label = label_proximal[0] + 1
     indx = np.argwhere(df_numpy[:, 3] == label)
-    mean_x = np.mean(df_numpy[indx, 1])
-    if mean_x >= mean_x_proximal:
-        STRUCT['Proximal LAD'] = label
-    else:
-        STRUCT['Proximal LCX'] = label
+
+    start_x_proximal = df_numpy[indx[0], 0]
+    start_y_proximal = df_numpy[indx[0], 1]
+
+    end_x_proximal = df_numpy[indx[-1], 0]
+    end_y_proximal = df_numpy[indx[-1], 1]
+
+    # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+    deltaY = end_y_proximal - start_y_proximal
+    deltaX = end_x_proximal - start_x_proximal
+    proximal_angle = atan2(deltaY, deltaX) * 180 / pi
+
+    neighbour = np.argwhere(co_occurrence[label, :] == 1)
+    num_neighbour = np.shape(neighbour)[0]
+    angle_matrix = np.zeros([num_neighbour, 2])
+
+    for i in range(num_neighbour):
+        label = neighbour[i]
+        label = label[0]
+        indx = np.argwhere(df_numpy[:, 3] == label)
+
+        start_x_proximal = df_numpy[indx[0], 0]
+        start_y_proximal = df_numpy[indx[0], 1]
+
+        end_x_proximal = df_numpy[indx[-1], 0]
+        end_y_proximal = df_numpy[indx[-1], 1]
+
+        # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+        deltaY = end_y_proximal - start_y_proximal
+        deltaX = end_x_proximal - start_x_proximal
+        angle = atan2(deltaY, deltaX) * 180 / pi
+
+        diff_angle = np.abs(proximal_angle - angle)
+
+        angle_matrix[i, 0] = diff_angle
+        angle_matrix[i, 1] = label
+
+        if diff_angle <= degree_angle:
+            STRUCT['Proximal LAD'] = label
+        else:
+            STRUCT['Proximal LCX'] = label
+
+    index = np.argsort(angle_matrix[:, 0], axis=0)
+
+    if num_neighbour == 2 and (STRUCT['Proximal LAD'] == -1 or STRUCT['Proximal LCX'] == -1):
+        STRUCT['Proximal LAD'] = angle_matrix[index[0], 1].astype('int64')
+        STRUCT['Proximal LCX'] = angle_matrix[index[1], 1].astype('int64')
+
+# level 3-1
+degree_angle = 40
+
+if STRUCT['Proximal LCX'] != -1:
+
+    label = STRUCT['Proximal LCX']
+    indx = np.argwhere(df_numpy[:, 3] == label)
+
+    start_x_proximal = df_numpy[indx[0], 0]
+    start_y_proximal = df_numpy[indx[0], 1]
+
+    end_x_proximal = df_numpy[indx[-1], 0]
+    end_y_proximal = df_numpy[indx[-1], 1]
+
+    # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+    deltaY = end_y_proximal - start_y_proximal
+    deltaX = end_x_proximal - start_x_proximal
+    proximal_angle = atan2(deltaY, deltaX) * 180 / pi
+
+    neighbour = np.argwhere(co_occurrence[label, :] == 1)
+    num_neighbour = np.shape(neighbour)[0]
+    angle_matrix = np.zeros([num_neighbour, 2])
+
+    for i in range(num_neighbour):
+        label = neighbour[i]
+        label = label[0]
+        indx = np.argwhere(df_numpy[:, 3] == label)
+
+        start_x_proximal = df_numpy[indx[0], 0]
+        start_y_proximal = df_numpy[indx[0], 1]
+
+        end_x_proximal = df_numpy[indx[-1], 0]
+        end_y_proximal = df_numpy[indx[-1], 1]
+
+        # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+        deltaY = end_y_proximal - start_y_proximal
+        deltaX = end_x_proximal - start_x_proximal
+        angle = atan2(deltaY, deltaX) * 180 / pi
+
+        diff_angle = np.abs(proximal_angle - angle)
+
+        angle_matrix[i, 0] = diff_angle
+        angle_matrix[i, 1] = label
+
+        if diff_angle <= degree_angle:
+            STRUCT['Mid-distal LCX'] = label
+        else:
+            STRUCT['First marginal'] = label
+
+    index = np.argsort(angle_matrix[:, 0], axis=0)
+
+    if num_neighbour == 2 and (STRUCT['Mid-distal LCX'] == -1 or STRUCT['First marginal'] == -1):
+        STRUCT['Mid-distal LCX'] = angle_matrix[index[0], 1].astype('int64')
+        STRUCT['First marginal'] = angle_matrix[index[1], 1].astype('int64')
 
 
+# level 3-2
+degree_angle = 20
 
+if STRUCT['Proximal LAD'] != -1:
+
+    label = STRUCT['Proximal LAD']
+    indx = np.argwhere(df_numpy[:, 3] == label)
+
+    start_x_proximal = df_numpy[indx[0], 0]
+    start_y_proximal = df_numpy[indx[0], 1]
+
+    end_x_proximal = df_numpy[indx[-1], 0]
+    end_y_proximal = df_numpy[indx[-1], 1]
+
+    # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+    deltaY = end_y_proximal - start_y_proximal
+    deltaX = end_x_proximal - start_x_proximal
+    proximal_angle = atan2(deltaY, deltaX) * 180 / pi
+
+    neighbour = np.argwhere(co_occurrence[label, :] == 1)
+    num_neighbour = np.shape(neighbour)[0]
+    angle_matrix = np.zeros([num_neighbour, 2])
+
+    for i in range(num_neighbour):
+        label = neighbour[i]
+        label = label[0]
+        indx = np.argwhere(df_numpy[:, 3] == label)
+
+        start_x_proximal = df_numpy[indx[0], 0]
+        start_y_proximal = df_numpy[indx[0], 1]
+
+        end_x_proximal = df_numpy[indx[-1], 0]
+        end_y_proximal = df_numpy[indx[-1], 1]
+
+        # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+        deltaY = end_y_proximal - start_y_proximal
+        deltaX = end_x_proximal - start_x_proximal
+        angle = atan2(deltaY, deltaX) * 180 / pi
+
+        diff_angle = np.abs(proximal_angle - angle)
+
+        angle_matrix[i, 0] = diff_angle
+        angle_matrix[i, 1] = label
+
+        if diff_angle <= degree_angle:
+            STRUCT['Mid LAD'] = label
+        else:
+            STRUCT['First Diagonal'] = label
+
+    index = np.argsort(angle_matrix[:, 0], axis=0)
+
+    if num_neighbour == 2 and (STRUCT['Mid LAD'] == -1 or STRUCT['First Diagonal'] == -1):
+        STRUCT['Mid LAD'] = angle_matrix[index[0], 1].astype('int64')
+        STRUCT['First Diagonal'] = angle_matrix[index[1], 1].astype('int64')
+
+
+# level 4-1
+degree_angle = 20
+
+if STRUCT['Mid-distal LCX'] != -1:
+
+    label = STRUCT['Mid-distal LCX']
+    indx = np.argwhere(df_numpy[:, 3] == label)
+
+    start_x_proximal = df_numpy[indx[0], 0]
+    start_y_proximal = df_numpy[indx[0], 1]
+
+    end_x_proximal = df_numpy[indx[-1], 0]
+    end_y_proximal = df_numpy[indx[-1], 1]
+
+    # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+    deltaY = end_y_proximal - start_y_proximal
+    deltaX = end_x_proximal - start_x_proximal
+    proximal_angle = atan2(deltaY, deltaX) * 180 / pi
+
+    neighbour = np.argwhere(co_occurrence[label, :] == 1)
+    num_neighbour = np.shape(neighbour)[0]
+    angle_matrix = np.zeros([num_neighbour, 2])
+
+    for i in range(num_neighbour):
+        label = neighbour[i]
+        label = label[0]
+
+        indx = np.argwhere(df_numpy[:, 3] == label)
+
+        start_x_proximal = df_numpy[indx[0], 0]
+        start_y_proximal = df_numpy[indx[0], 1]
+
+        end_x_proximal = df_numpy[indx[-1], 0]
+        end_y_proximal = df_numpy[indx[-1], 1]
+
+        # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
+        deltaY = end_y_proximal - start_y_proximal
+        deltaX = end_x_proximal - start_x_proximal
+        angle = atan2(deltaY, deltaX) * 180 / pi
+
+        diff_angle = np.abs(proximal_angle - angle)
+
+        angle_matrix[i, 0] = diff_angle
+        angle_matrix[i, 1] = label
+
+        if diff_angle <= degree_angle:
+            STRUCT['Left PDA'] = label
+        else:
+            STRUCT['Posterolateral branch'] = label
+
+    index = np.argsort(angle_matrix[:, 0], axis=0)
+
+    if num_neighbour == 2 and (STRUCT['Left PDA'] == -1 or STRUCT['Posterolateral branch'] == -1):
+        STRUCT['Left PDA'] = angle_matrix[index[0], 1].astype('int64')
+        STRUCT['Posterolateral branch'] = angle_matrix[index[1], 1].astype('int64')
 
 
 a=1
@@ -326,13 +796,7 @@ a=1
 # kernel = ball(1)
 # convol = convolve(centerline, kernel, mode='constant', cval=0.0)
 
-kernel = ball(2)
-endpoints_dilated = binary_dilation(endpoints, kernel)
-final = endpoints_dilated
 
-centerline_name = 'endpoint_' + niftiroot + '.nii.gz'
-mask = nib.Nifti1Image(final, img1.affine, img1.header)
-nib.save(mask, os.path.join(niftidir, centerline_name))
 
 
 # start point and endpoint selection
