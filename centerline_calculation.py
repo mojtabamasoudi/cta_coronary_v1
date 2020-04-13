@@ -19,9 +19,9 @@ def centerline_calculation(niftidir, niftiname, niftiroot, niftiname_intersect):
     myargs = 'vmtkmarchingcubes -ifile ' + niftiname + ' -l 1.0 -ofile ' + surface
     mypype = pypes.PypeRun(myargs)
 
-
+    smoothing_iteration = 2500
     surface_smooth = surface + '_smooth.vtp'
-    myargs = 'vmtksurfacesmoothing -iterations 2500 -ifile ' + surface + ' -ofile ' + surface_smooth
+    myargs = 'vmtksurfacesmoothing -iterations ' + smoothing_iteration + ' -ifile ' + surface + ' -ofile ' + surface_smooth
     mypype = pypes.PypeRun(myargs)
 
 
@@ -125,7 +125,7 @@ def endpoint_calculation(niftidir, size_data, csv_file, intersect):
         centerlines[x, y, z] = label
 
     # save centerline in niffti format
-    centerline_name = 'centerlines.nii.gz'
+    centerline_name = 'centerlines_' + intersect
     filename1 = os.path.join(niftidir, intersect)
     img1 = nib.load(filename1)
     mask = nib.Nifti1Image(centerlines, img1.affine, img1.header)
@@ -188,8 +188,11 @@ def endpoint_calculation(niftidir, size_data, csv_file, intersect):
     # mask = nib.Nifti1Image(endpoints, img1.affine, img1.header)
     # nib.save(mask, os.path.join(niftidir, centerline_name))
 
-    # co-occurrence matrix between branches
+    # co-occurrence matrix between branches (shows neighbourhood for each branches)
     label = np.max(df_numpy[:, 3])
+
+    # in some cases the direction of startpoint and endpoint are not forward. For this cases we use
+    # co_occurrence_inverse matrix
 
     co_occurrence = np.zeros([label + 1, label + 1])
     co_occurrence_inverse = np.zeros([label + 1, label + 1])
@@ -238,10 +241,11 @@ def endpoint_calculation(niftidir, size_data, csv_file, intersect):
 
     ff = np.argwhere(ee < distance_thresh)
     ff = np.floor(ff / 2)
-    labels_near_aorta = np.unique(ff)  # these labels should be join together as proxiaml branch close to aorta
+    labels_near_aorta = np.unique(ff)  # these labels should be join together as proximal branch close to aorta
     labels_near_aorta = (labels_near_aorta).astype('int32')
 
-    # extracting main label and checking whether is not endpoint
+    # extracting main label and checking whether is endpoint or not
+    # if was endpoint, try another big one
     flag = -1
     labels_near_aorta_temp = labels_near_aorta
     endpoints_label = endpoints_list[:, 3] - 1
@@ -305,15 +309,18 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
         end_x_proximal = df_numpy[indx[-1], 0]
         end_y_proximal = df_numpy[indx[-1], 1]
 
-        # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
         deltaY = end_y_proximal - start_y_proximal
         deltaX = end_x_proximal - start_x_proximal
+
+        # calculation angle between branches and horizontal axes
         proximal_angle = atan2(deltaY, deltaX) * 180 / pi
 
+        # finding neighbour of this branch
         neighbour = np.argwhere(co_occurrence[label, :] == 1)
         num_neighbour = np.shape(neighbour)[0]
         angle_matrix = np.zeros([num_neighbour, 2])
 
+        # comparing branch angle and its neighbour angle
         for i in range(num_neighbour):
             label = neighbour[i]
             label = label[0]
@@ -325,7 +332,6 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
             end_x_proximal = df_numpy[indx[-1], 0]
             end_y_proximal = df_numpy[indx[-1], 1]
 
-            # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
             deltaY = end_y_proximal - start_y_proximal
             deltaX = end_x_proximal - start_x_proximal
             angle = atan2(deltaY, deltaX) * 180 / pi
@@ -342,6 +348,7 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
 
         index = np.argsort(angle_matrix[:, 0], axis=0)
 
+        # decision for some branches that both neighbour angles are bigger or smaller than proximal angle
         if num_neighbour == 2 and (STRUCT['Proximal LAD'] == -1 or STRUCT['Proximal LCX'] == -1):
             STRUCT['Proximal LAD'] = angle_matrix[index[0], 1].astype('int64')
             STRUCT['Proximal LCX'] = angle_matrix[index[1], 1].astype('int64')
@@ -360,7 +367,6 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
         end_x_proximal = df_numpy[indx[-1], 0]
         end_y_proximal = df_numpy[indx[-1], 1]
 
-        # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
         deltaY = end_y_proximal - start_y_proximal
         deltaX = end_x_proximal - start_x_proximal
         proximal_angle = atan2(deltaY, deltaX) * 180 / pi
@@ -380,7 +386,6 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
             end_x_proximal = df_numpy[indx[-1], 0]
             end_y_proximal = df_numpy[indx[-1], 1]
 
-            # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
             deltaY = end_y_proximal - start_y_proximal
             deltaX = end_x_proximal - start_x_proximal
             angle = atan2(deltaY, deltaX) * 180 / pi
@@ -415,7 +420,6 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
         end_x_proximal = df_numpy[indx[-1], 0]
         end_y_proximal = df_numpy[indx[-1], 1]
 
-        # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
         deltaY = end_y_proximal - start_y_proximal
         deltaX = end_x_proximal - start_x_proximal
         proximal_angle = atan2(deltaY, deltaX) * 180 / pi
@@ -435,7 +439,6 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
             end_x_proximal = df_numpy[indx[-1], 0]
             end_y_proximal = df_numpy[indx[-1], 1]
 
-            # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
             deltaY = end_y_proximal - start_y_proximal
             deltaX = end_x_proximal - start_x_proximal
             angle = atan2(deltaY, deltaX) * 180 / pi
@@ -470,7 +473,6 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
         end_x_proximal = df_numpy[indx[-1], 0]
         end_y_proximal = df_numpy[indx[-1], 1]
 
-        # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
         deltaY = end_y_proximal - start_y_proximal
         deltaX = end_x_proximal - start_x_proximal
         proximal_angle = atan2(deltaY, deltaX) * 180 / pi
@@ -491,7 +493,6 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
             end_x_proximal = df_numpy[indx[-1], 0]
             end_y_proximal = df_numpy[indx[-1], 1]
 
-            # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
             deltaY = end_y_proximal - start_y_proximal
             deltaX = end_x_proximal - start_x_proximal
             angle = atan2(deltaY, deltaX) * 180 / pi
@@ -542,7 +543,6 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
     previous_z = aorta_z
 
     # level 2
-    degree_angle = 40
 
     if STRUCT['Proximal RCA'] != -1:
         label = label_proximal + 1
@@ -556,11 +556,11 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
         end_y_proximal = df_numpy[indx[-1], 1]
         end_z_proximal = df_numpy[indx[-1], 2]
 
-        # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
         deltaY = end_y_proximal - start_y_proximal
         deltaX = end_x_proximal - start_x_proximal
         proximal_angle = atan2(deltaY, deltaX) * 180 / pi
 
+        # decision for using co_occurrence or co_occurrence_inverse matrix to calculate neighbour
         if (np.abs(end_z_proximal - previous_z) >= np.abs(start_z_proximal - previous_z)):
             neighbour = np.argwhere(co_occurrence[label, :] == 1)
             previous_z = end_z_proximal
@@ -582,7 +582,6 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
             end_x_proximal = df_numpy[indx[-1], 0]
             end_y_proximal = df_numpy[indx[-1], 1]
 
-            # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
             deltaY = end_y_proximal - start_y_proximal
             deltaX = end_x_proximal - start_x_proximal
             angle = atan2(deltaY, deltaX) * 180 / pi
@@ -617,7 +616,6 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
         end_y_proximal = df_numpy[indx[-1], 1]
         end_z_proximal = df_numpy[indx[-1], 2]
 
-        # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
         deltaY = end_y_proximal - start_y_proximal
         deltaX = end_x_proximal - start_x_proximal
         proximal_angle = atan2(deltaY, deltaX) * 180 / pi
@@ -643,7 +641,6 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
             end_x_proximal = df_numpy[indx[-1], 0]
             end_y_proximal = df_numpy[indx[-1], 1]
 
-            # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
             deltaY = end_y_proximal - start_y_proximal
             deltaX = end_x_proximal - start_x_proximal
             angle = atan2(deltaY, deltaX) * 180 / pi
@@ -678,7 +675,6 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
         end_y_proximal = df_numpy[indx[-1], 1]
         end_z_proximal = df_numpy[indx[-1], 2]
 
-        # proximal_angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
         deltaY = end_y_proximal - start_y_proximal
         deltaX = end_x_proximal - start_x_proximal
         proximal_angle = atan2(deltaY, deltaX) * 180 / pi
@@ -704,7 +700,6 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
             end_x_proximal = df_numpy[indx[-1], 0]
             end_y_proximal = df_numpy[indx[-1], 1]
 
-            # angle = getAngleBetweenPoints(start_x_proximal, start_y_proximal, end_x_proximal, end_y_proximal)
             deltaY = end_y_proximal - start_y_proximal
             deltaX = end_x_proximal - start_x_proximal
             angle = atan2(deltaY, deltaX) * 180 / pi
@@ -768,7 +763,8 @@ def main():
     mask = nib.Nifti1Image(dilated_right_cor, img1.affine, img1.header)
     nib.save(mask, os.path.join(niftidir, niftiname_R))
 
-    # generating intersection mask between right and left
+    # generating intersection mask between aorta and right, left side
+    # this intersection can be used for opening surface
     filename2 = os.path.join(niftidir, aorta_name)
     img2 = nib.load(filename2)
     aorta = img2.get_fdata()
@@ -839,7 +835,7 @@ def main():
 
     # labeling branches
     # right side
-    struct = branch_labeling_left(niftidir, csv_file_L, co_occurrence, co_occurrence_inverse,
+    struct = branch_labeling_right(niftidir, csv_file_R, co_occurrence, co_occurrence_inverse,
                                   labels_near_aorta, label_proximal, aorta_z)
 
 
