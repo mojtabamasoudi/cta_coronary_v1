@@ -5,6 +5,7 @@ import nibabel as nib
 from skimage.morphology import ball, binary_dilation
 import pandas as pd
 from math import *
+import time
 
 def centerline_calculation(niftidir, niftiname, niftiroot, niftiname_intersect):
 
@@ -20,8 +21,8 @@ def centerline_calculation(niftidir, niftiname, niftiroot, niftiname_intersect):
     mypype = pypes.PypeRun(myargs)
 
     smoothing_iteration = 2500
-    surface_smooth = surface + '_smooth.vtp'
-    myargs = 'vmtksurfacesmoothing -iterations ' + smoothing_iteration + ' -ifile ' + surface + ' -ofile ' + surface_smooth
+    surface_smooth = niftiroot + '_smooth.vtp'
+    myargs = 'vmtksurfacesmoothing -iterations ' + str(smoothing_iteration) + ' -ifile ' + surface + ' -ofile ' + surface_smooth
     mypype = pypes.PypeRun(myargs)
 
 
@@ -30,13 +31,13 @@ def centerline_calculation(niftidir, niftiname, niftiroot, niftiname_intersect):
     mypype = pypes.PypeRun(myargs)
 
 
-    surface_clip = surface + '_clip.vtp'
+    surface_clip = niftiroot + '_clip.vtp'
     myargs = 'vmtksurfacecliploop -ifile ' + surface_smooth + \
              ' -i2file ' + surface_intersect + ' -ofile ' + surface_clip
     mypype = pypes.PypeRun(myargs)
 
 
-    surface_centerline = surface + '_centerline.vtp'
+    surface_centerline = niftiroot + '_centerline.vtp'
     myargs = 'vmtknetworkextraction -ifile ' + surface_clip + ' -ofile ' + surface_centerline
     mypype = pypes.PypeRun(myargs)
 
@@ -108,7 +109,7 @@ def centerline_calculation(niftidir, niftiname, niftiroot, niftiname_intersect):
     return csv_file
 
 
-def endpoint_calculation(niftidir, size_data, csv_file, intersect):
+def endpoint_calculation(niftidir, size_data, csv_file, niftiroot, intersect):
 
     centerlines = np.zeros(size_data)
     endpoints = np.zeros(size_data)
@@ -125,9 +126,10 @@ def endpoint_calculation(niftidir, size_data, csv_file, intersect):
         centerlines[x, y, z] = label
 
     # save centerline in niffti format
-    centerline_name = 'centerlines_' + intersect
+    centerline_name = niftiroot + '_centerlines.nii.gz'
     filename1 = os.path.join(niftidir, intersect)
     img1 = nib.load(filename1)
+    data1 = img1.get_fdata()
     mask = nib.Nifti1Image(centerlines, img1.affine, img1.header)
     nib.save(mask, os.path.join(niftidir, centerline_name))
 
@@ -221,10 +223,6 @@ def endpoint_calculation(niftidir, size_data, csv_file, intersect):
 
     # calculate distance of candidate points from aorta
     start_end = np.reshape(start_end, [label * 2, 4])
-
-    filename1 = os.path.join(niftidir, intersect)
-    img1 = nib.load(filename1)
-    data1 = img1.get_fdata()
 
     slice_index = np.argwhere(data1 > 0)
     x = slice_index[0, 0]
@@ -724,10 +722,141 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
 
     return STRUCT
 
+def cmpr_preparation(niftidir, niftiroot, dilated_cor_aorta_name, csv_endpoint_file, cx, cy, cz ):
+
+    from vmtk import pypes
+    from vmtk import vmtkscripts
+
+    os.chdir(niftidir)
+
+    # automatically centerline calculation
+
+    surface = niftiroot + '_cor_aorta.vtp'
+    myargs = 'vmtkmarchingcubes -ifile ' + dilated_cor_aorta_name + ' -l 1.0 -ofile ' + surface
+    mypype = pypes.PypeRun(myargs)
+
+    smoothing_iteration = 2500
+    surface_smooth = niftiroot + '_smooth.vtp'
+    myargs = 'vmtksurfacesmoothing -iterations ' + str(smoothing_iteration) + ' -ifile ' + surface + ' -ofile ' + surface_smooth
+    mypype = pypes.PypeRun(myargs)
+
+
+    filename1 = os.path.join(niftidir, csv_endpoint_file)
+    df = pd.read_csv(filename1)
+    df_numpy = np.round(df.to_numpy().astype(np.int32))
+
+    for i in range(df.values.shape[0]):
+        x = df_numpy[i, 0]
+        y = df_numpy[i, 1]
+        z = df_numpy[i, 2]
+        label = df_numpy[i, 3]
+
+        centreline_file = niftiroot + '_centerline_' + str(i) + '.vtp'
+
+        SourcePoint = [cx, cy, cz]
+        TargetPoint = [x, y, z]
+
+        modelfile = surface_smooth
+
+        myargs = 'vmtkimagereader -ifile  ' + dilated_cor_aorta_name
+        mypype = pypes.PypeRun(myargs)
+
+        RasToIjkMatrixCoefficients = mypype.GetScriptObject('vmtkimagereader', '0').RasToIjkMatrixCoefficients
+        XyzToRasMatrixCoefficients = mypype.GetScriptObject('vmtkimagereader', '0').XyzToRasMatrixCoefficients
+        ras2ijk = np.asarray(RasToIjkMatrixCoefficients)
+        ras2ijk = np.reshape(ras2ijk, (4, 4))
+        xyz2ras = np.asarray(XyzToRasMatrixCoefficients)
+        xyz2ras = np.reshape(xyz2ras, (4, 4))
+
+        Image = mypype.GetScriptObject('vmtkimagereader', '0').Image
+
+        print([SourcePoint[0], SourcePoint[1], SourcePoint[2]])
+        sourcepoint_img = Image.GetPoint(
+            Image.ComputePointId([int(SourcePoint[0]), int(SourcePoint[1]), int(SourcePoint[2])]))
+        print(sourcepoint_img)
+
+        # sourcepoint_orig = Image.ComputeStructuredCoordinates(Image.FindPoint(Image.GetPoint(Image.ComputePointId([SourcePoint[0], SourcePoint[1], SourcePoint[2]]))))
+        # sourcepoint_orig = Image.GetPoint([SourcePoint[0], SourcePoint[1], SourcePoint[2]])
+        # print(sourcepoint_orig)
+
+        # ##################### DEBUG #####################
+        # import code
+        # code.interact(local=locals())  # inline debugging
+        # #################################################
+
+        targetpoint_img = Image.GetPoint(
+            Image.ComputePointId([int(TargetPoint[0]), int(TargetPoint[1]), int(TargetPoint[2])]))
+        print(targetpoint_img)
+
+        myargs = 'vmtksurfacereader -ifile  ' + modelfile
+        mypype = pypes.PypeRun(myargs)
+        Surface = mypype.GetScriptObject('vmtksurfacereader', '0').Surface
+
+        # sourcepointId_surf = str(Surface.FindPoint(Surface.GetPoint(Surface.FindPoint(sourcepoint_img))))
+        sourcepointId_surf = str(Surface.FindPoint(sourcepoint_img))
+        print(sourcepointId_surf)
+
+        # targetpointId_surf = str(Surface.FindPoint(Surface.GetPoint(Surface.FindPoint(targetpoint_img))))
+        targetpointId_surf = str(Surface.FindPoint(targetpoint_img))
+        print(targetpointId_surf)
+
+        # import sys
+        # sys.exit(0)
+
+        # centreline_file = 'centreline_' + niftiroot + '.vtp'
+        # sourcepoint = '197 23 9'
+        # targetpoint = '195 25 53'
+        # myargs = 'vmtkcenterlines -ifile ' + modelfile + ' -ofile ' + centreline_file + ' -sourcepoints ' + sourcepoint_surf + ' -targetpoints ' + targetpoint_surf + ' -seedselector pointlist'
+        myargs = 'vmtkcenterlines -ifile ' + modelfile + ' -ofile ' + centreline_file + ' -sourceids ' + sourcepointId_surf + ' -targetids ' + targetpointId_surf + ' -seedselector idlist'
+        mypype = pypes.PypeRun(myargs)
+
+        myargs = 'vmtksurfacereader -ifile ' + surface_smooth + ' --pipe ' + \
+                 'vmtkrenderer --pipe ' + \
+                 'vmtksurfaceviewer -opacity 0.25' + ' --pipe ' + \
+                 'vmtksurfaceviewer -ifile ' + centreline_file + ' -array MaximumInscribedSphereRadius'
+
+        mypype = pypes.PypeRun(myargs)
+
+        # export senterline coordinates
+        centerlineReader = vmtkscripts.vmtkSurfaceReader()
+        centerlineReader.InputFileName = centreline_file
+        centerlineReader.Execute()
+
+        clNumpyAdaptor = vmtkscripts.vmtkCenterlinesToNumpy()
+        clNumpyAdaptor.Centerlines = centerlineReader.Surface
+        # clNumpyAdaptor.ConvertCellToPoint = 1
+        clNumpyAdaptor.Execute()
+
+        numpyCenterlines = clNumpyAdaptor.ArrayDict
+        points = numpyCenterlines['Points']
+
+        # ##################### DEBUG #####################
+        # import code
+        # code.interact(local=locals())  # inline debugging
+        # #################################################
+
+        for x in range(points.shape[0]):
+            xyz = points[x]
+            xyz = np.append(xyz, 1)
+            ras = np.dot(xyz2ras, xyz)
+            ijk = np.dot(ras2ijk, ras)
+            if x == 0:
+                points_ijk = ijk
+            else:
+                points_ijk = np.append(points_ijk, ijk, axis=0)
+
+        points_ijk = np.reshape(points_ijk, [x + 1, 4])
+        points_ijk = np.round(points_ijk[:, 0:3])
+        print(points_ijk)
+
+        csv_file = niftiroot + '_centerline_' + str(i) + '.csv'
+        np.savetxt(csv_file, points_ijk, delimiter=",")
+
+
 
 def main():
-
-    niftidir = r'D:\Mojtaba\Dataset_test\9'
+    tic = time.time()
+    niftidir = r'D:\Mojtaba\Dataset_test\test\002_bi_shuying_ct1668532'
 
     aorta_name = 'aorta.nii.gz'
     kernel_size = 2  # dilation for connecting aorta and arteries
@@ -739,6 +868,8 @@ def main():
 
     niftiname_R = 'R_coronary.nii.gz'
     niftiroot_R = 'R_coronary'
+
+    # # # # # # # # # data preparation # # # # # # # # #
 
     # left and right seperation
     filename1 = os.path.join(niftidir, niftiname)
@@ -782,12 +913,17 @@ def main():
     y = slice_index[0, 1]
     z = slice_index[0, 2]
 
-    kernel = np.array([[[1, 1, 1], [1, 1, 1], [1, 1, 1]],
-                       [[1, 1, 1], [1, 1, 1], [1, 1, 1]],
-                       [[1, 1, 1], [1, 1, 1], [1, 1, 1]]])
+    # kernel = np.array([[[1, 1, 1], [1, 1, 1], [1, 1, 1]],
+    #                    [[1, 1, 1], [1, 1, 1], [1, 1, 1]],
+    #                    [[1, 1, 1], [1, 1, 1], [1, 1, 1]]])
+    size_surface = 4
+    kernel = np.ones([size_surface*2+1, size_surface*2+1, size_surface*2+1])
 
-    two_surface[x - 1:x + 2, y - 1:y + 2, z - 1:z + 2] = kernel
-    two_surface[x - 1:x + 2, y - 1:y + 2, z:z + 3] = kernel
+
+    two_surface[x - size_surface:x + (size_surface+1), y - size_surface:y + (size_surface+1),
+    z - size_surface:z + (size_surface+1)] = kernel
+    two_surface[x - size_surface:x + (size_surface+1), y - size_surface:y + (size_surface+1),
+    z - (size_surface-1):z + (size_surface+2)] = kernel
 
     mask = nib.Nifti1Image(two_surface, img1.affine, img1.header)
 
@@ -804,41 +940,84 @@ def main():
     y = slice_index[0, 1]
     z = slice_index[0, 2]
 
-    two_surface[x - 1:x + 2, y - 1:y + 2, z - 1:z + 2] = kernel
-    two_surface[x - 1:x + 2, y - 1:y + 2, z:z + 3] = kernel
+    two_surface[x - size_surface:x + (size_surface+1), y - size_surface:y + (size_surface+1),
+    z - size_surface:z + (size_surface+1)] = kernel
+    two_surface[x - size_surface:x + (size_surface+1), y - size_surface:y + (size_surface+1),
+    z - (size_surface-1):z + (size_surface+2)] = kernel
 
     mask = nib.Nifti1Image(two_surface, img1.affine, img1.header)
 
     intersect_R = niftiroot_R +'_intersect.nii.gz'
     nib.save(mask, os.path.join(niftidir, intersect_R))
 
-    # calculation left side centerline
-    csv_file_L = centerline_calculation(niftidir, niftiname_L, niftiroot_L, intersect_L)
+    # # # # # # # # # # branch/sub-branch labeling # # # # # # # # #
+    #
+    # # calculation left side centerline
+    # csv_file_L = centerline_calculation(niftidir, niftiname_L, niftiroot_L, intersect_L)
+    #
+    # # calculation right side centerline
+    # csv_file_R = centerline_calculation(niftidir, niftiname_R, niftiroot_R, intersect_R)
+    #
+    # # calculation of endpoints, co_occurrence matrix and labels near to aorta
+    # # left side
+    # co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, aorta_z = endpoint_calculation\
+    #     (niftidir, np.shape(coronary), csv_file_L, niftiroot_L, intersect_L)
+    #
+    # # labeling branches
+    # # left side
+    # struct = branch_labeling_left(niftidir, csv_file_L, co_occurrence, co_occurrence_inverse,
+    #                               labels_near_aorta, label_proximal, aorta_z)
+    #
+    # # TODO put struct inside the csv file
+    #
+    # # calculation of endpoints, co_occurrence matrix and labels near to aorta
+    # # right side
+    # co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, aorta_z = endpoint_calculation\
+    #     (niftidir, np.shape(coronary), csv_file_R, niftiroot_R, intersect_R)
+    #
+    # # labeling branches
+    # # right side
+    # struct = branch_labeling_right(niftidir, csv_file_R, co_occurrence, co_occurrence_inverse,
+    #                               labels_near_aorta, label_proximal, aorta_z)
+    #
+    # # TODO put struct inside the csv file
 
-    # calculation right side centerline
-    csv_file_R = centerline_calculation(niftidir, niftiname_R, niftiroot_R, intersect_R)
+    # # # # # # # # # CMPR preparation # # # # # # # # #
+    # right
+    dilated_right_cor_aorta = dilated_right_cor + dilated_aorta
+    dilated_right_cor_aorta = dilated_right_cor_aorta > 0
 
-    # calculation of endpoints, co_occurrence matrix and labels near to aorta
-    # left side
-    co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, aorta_z = endpoint_calculation\
-        (niftidir, np.shape(coronary), csv_file_L, intersect_L)
+    mask = nib.Nifti1Image(dilated_right_cor_aorta, img1.affine, img1.header)
 
-    # labeling branches
-    # left side
-    struct = branch_labeling_left(niftidir, csv_file_L, co_occurrence, co_occurrence_inverse,
-                                  labels_near_aorta, label_proximal, aorta_z)
+    dilated_right_cor_aorta_name = 'dilated_right_cor_aorta.nii.gz'
+    nib.save(mask, os.path.join(niftidir, dilated_right_cor_aorta_name))
 
-    # calculation of endpoints, co_occurrence matrix and labels near to aorta
-    # right side
-    co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, aorta_z = endpoint_calculation\
-        (niftidir, np.shape(coronary), csv_file_R, intersect_R)
+    # left
+    dilated_left_cor_aorta = dilated_left_cor + dilated_aorta
+    dilated_left_cor_aorta = dilated_left_cor_aorta > 0
 
-    # labeling branches
-    # right side
-    struct = branch_labeling_right(niftidir, csv_file_R, co_occurrence, co_occurrence_inverse,
-                                  labels_near_aorta, label_proximal, aorta_z)
+    mask = nib.Nifti1Image(dilated_left_cor_aorta, img1.affine, img1.header)
 
+    dilated_left_cor_aorta_name = 'dilated_left_cor_aorta.nii.gz'
+    nib.save(mask, os.path.join(niftidir, dilated_left_cor_aorta_name))
 
+    # center of aorta
+    import cv2
+    a = np.argwhere(aorta == 1)
+    minimum = np.min(a[:, 2])
+    maximum = np.max(a[:, 2])
+    cz = int(np.round((maximum + minimum) / 2))
+    mid_slice = aorta[:, :, cz]
+    M = cv2.moments(mid_slice)
+    cy = int(M["m10"] / M["m00"])
+    cx = int(M["m01"] / M["m00"])
+
+    csv_file_L = 'centreline_' + niftiroot_L + '.csv'
+    csv_endpoint_file = 'endpoint_' + csv_file_L
+    cmpr_preparation(niftidir, niftiroot_L, dilated_left_cor_aorta_name, csv_endpoint_file, cx, cy, cz)
+
+    toc = time.time()
+    print((toc - tic) / 60)
 
 if __name__ == '__main__':
     main()
