@@ -275,30 +275,50 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
     filename1 = os.path.join(niftidir, csv_file)
     df = pd.read_csv(filename1)
     df_numpy = np.round(df.to_numpy().astype(np.int32))
+    branch_label_map = np.ones([np.shape(df_numpy)[0], 1]) * -1
+    branch_parenthood = np.ones([np.shape(df_numpy)[0], 1]) * -1
 
     # branch labeling left
     STRUCT = {
-        'Left main': -1,
-        'Proximal LAD': -1,
-        'Mid LAD': -1,
-        'Distal LAD': -1,
-        'First Diagonal': -1,
-        'Second Diagonal': -1,
-        'Proximal LCX': -1,
-        'First marginal': -1,
-        'Mid-distal LCX': -1,
-        'Posterolateral branch': -1,
-        'Left PDA': -1,
+        'aorta' : -1, # 0
+        'Left main': -1,  # 5
+        'Proximal LAD': -1,  # 6
+        'Mid LAD': -1,  # 7
+        'Distal LAD': -1,  # 8
+        'First Diagonal': -1,  # 9
+        'Second Diagonal': -1,  # 10
+        'Proximal LCX': -1,  # 11
+        'First marginal': -1,  # 12
+        'Mid-distal LCX': -1,  # 13
+        'Posterolateral branch': -1,  # 14
+        'Left PDA': -1,  # 15
     }
 
     # level 1
-    STRUCT['Left main'] = [labels_near_aorta + 1]
+    STRUCT['aorta'] = [labels_near_aorta + 1]
+
+    # set label zero to all labels near to aorta
+    num_labels = np.shape(labels_near_aorta)[0]
+    for i in range(num_labels):
+        label = STRUCT['aorta'][0][i]
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 0
+        branch_parenthood[index] = 0
+
+    label = label_proximal + 1
+    STRUCT['Left main'] = label
+    index = np.argwhere(df_numpy[:, 3] == label)
+    branch_label_map[index] = 5
+    branch_parenthood[index] = 0
+
+
 
     # level 2
     degree_angle = 40
 
     if STRUCT['Left main'] != -1:
-        label = label_proximal + 1
+
+        label = STRUCT['Left main']
         indx = np.argwhere(df_numpy[:, 3] == label)
 
         start_x_proximal = df_numpy[indx[0], 0]
@@ -350,6 +370,17 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
         if num_neighbour == 2 and (STRUCT['Proximal LAD'] == -1 or STRUCT['Proximal LCX'] == -1):
             STRUCT['Proximal LAD'] = angle_matrix[index[0], 1].astype('int64')
             STRUCT['Proximal LCX'] = angle_matrix[index[1], 1].astype('int64')
+
+        label = STRUCT['Proximal LAD']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 6
+        branch_parenthood[index] = label_proximal + 1
+
+        label = STRUCT['Proximal LCX']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 11
+        branch_parenthood[index] = label_proximal + 1
+
 
     # level 3-1
     degree_angle = 40
@@ -404,6 +435,20 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
             STRUCT['Mid-distal LCX'] = angle_matrix[index[0], 1].astype('int64')
             STRUCT['First marginal'] = angle_matrix[index[1], 1].astype('int64')
 
+        label = STRUCT['Mid-distal LCX']
+        parenthood = STRUCT['Proximal LCX']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 13
+        branch_parenthood[index] = parenthood
+
+        label = STRUCT['First marginal']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 12
+        branch_parenthood[index] = parenthood
+
+
+
+
     # level 3-2
     degree_angle = 20
 
@@ -456,6 +501,17 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
         if num_neighbour == 2 and (STRUCT['Mid LAD'] == -1 or STRUCT['First Diagonal'] == -1):
             STRUCT['Mid LAD'] = angle_matrix[index[0], 1].astype('int64')
             STRUCT['First Diagonal'] = angle_matrix[index[1], 1].astype('int64')
+
+        label = STRUCT['Mid LAD']
+        parenthood = STRUCT['Proximal LAD']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 7
+        branch_parenthood[index] = parenthood
+
+        label = STRUCT['First Diagonal']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 9
+        branch_parenthood[index] = parenthood
 
     # level 4-1
     degree_angle = 20
@@ -511,9 +567,144 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
             STRUCT['Left PDA'] = angle_matrix[index[0], 1].astype('int64')
             STRUCT['Posterolateral branch'] = angle_matrix[index[1], 1].astype('int64')
 
+        label = STRUCT['Left PDA']
+        parenthood = STRUCT['Mid-distal LCX']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 15
+        branch_parenthood[index] = parenthood
+
+        label = STRUCT['Posterolateral branch']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 14
+        branch_parenthood[index] = parenthood
+
+
     print(STRUCT)
 
-    return STRUCT
+    output = np.ones([np.shape(df_numpy)[0], np.shape(df_numpy)[1] + 2])
+    output[:, 0:4] = df_numpy
+    output[:, 4:5] = branch_label_map
+    output[:, 5:6] = branch_parenthood
+
+    csv_file = 'branch_' + csv_file
+    np.savetxt(csv_file, output, delimiter=",")
+
+    # convert to JSON file
+    import json
+
+    # branch_name = 'aorta'
+    # if STRUCT[branch_name] != -1:
+    #     label = list(STRUCT[branch_name][0])
+    #     label = list(map(int, label))
+    #     parenthood = 0
+    #     label_map = 0
+    #     json_string = dict_to_json(branch_name, parenthood, label, label_map, output)
+
+    branch_name = 'Left main'
+    if STRUCT[branch_name] != -1:
+        parenthood = 0
+        label_map = 5
+        json_string = dict_to_json(branch_name, parenthood, label_map, output)
+
+    branch_name = 'Proximal LAD'
+    if STRUCT[branch_name] != -1:
+        parenthood = 5
+        label_map = 6
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'Mid LAD'
+    if STRUCT[branch_name] != -1:
+        parenthood = 6
+        label_map = 7
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'Distal LAD'
+    if STRUCT[branch_name] != -1:
+        parenthood = 7
+        label_map = 8
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'First Diagonal'
+    if STRUCT[branch_name] != -1:
+        parenthood = 6
+        label_map = 9
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'Second Diagonal'
+    if STRUCT[branch_name] != -1:
+        parenthood = 7
+        label_map = 10
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'Proximal LCX'
+    if STRUCT[branch_name] != -1:
+        parenthood = 5
+        label_map = 11
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'Mid-distal LCX'
+    if STRUCT[branch_name] != -1:
+        parenthood = 11
+        label_map = 13
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'First marginal'
+    if STRUCT[branch_name] != -1:
+        parenthood = 11
+        label_map = 12
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'Posterolateral branch'
+    if STRUCT[branch_name] != -1:
+        parenthood = 13
+        label_map = 14
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'Left PDA'
+    if STRUCT[branch_name] != -1:
+        parenthood = 13
+        label_map = 15
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    # for branches without label
+    branch_name = 'unknown'
+    parenthood = -1
+    label_map = -1
+    json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+    json_string = json_string + json_string1
+
+    os.chdir(niftidir)
+    filename = csv_file + '.txt'
+    with open(filename, 'w') as outfile:
+        json.dump(json_string, outfile)
+
+
+def dict_to_json(branch_name, parenthood, label_map, output):
+
+    import json
+    index = np.argwhere(output[:, 4] == label_map)
+    coordinate_dict = list()
+    for i in range(np.shape(index)[0]):
+        dict_temp = dict(X=int(output[index[i], 0][0]), Y=int(output[index[i], 1][0]),
+                         Z=int(output[index[i], 2][0]))
+        coordinate_dict.append(dict_temp)
+
+    coordinate_dict = tuple(coordinate_dict)
+
+    dict_object = dict(branch_name=branch_name, parenthood=parenthood, label=label_map, coordinates=coordinate_dict)
+    json_string = json.dumps(dict_object)
+
+    return json_string
 
 
 def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal,
@@ -522,28 +713,47 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
     filename1 = os.path.join(niftidir, csv_file)
     df = pd.read_csv(filename1)
     df_numpy = np.round(df.to_numpy().astype(np.int32))
+    branch_label_map = np.ones([np.shape(df_numpy)[0], 1]) * -1
+    branch_parenthood = np.ones([np.shape(df_numpy)[0], 1]) * -1
 
     degree_angle = 40
 
     # branch labeling right
     STRUCT = {
-        'Proximal RCA': -1,
-        'Mid RCA': -1,
-        'Distal RCA': -1,
-        'Right PDA': -1,
-        'V': -1,
-        'AM': -1,
-        'RPD': -1,
+        'aorta': -1, # 0
+        'Proximal RCA': -1,  # 1
+        'Mid RCA': -1,  # 2
+        'Distal RCA': -1,  # 3
+        'Right PDA': -1,  # 4
+        'V': -1,  # 16
+        'AM': -1,  # 17
+        'RPD': -1,  # 18
     }
 
     # level 1
     STRUCT['Proximal RCA'] = [labels_near_aorta + 1]
     previous_z = aorta_z
 
+    # set label 1 to all labels left main
+    num_labels = np.shape(labels_near_aorta)[0]
+    for i in range(num_labels):
+        label = STRUCT['Proximal RCA'][0][i]
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 0
+        branch_parenthood[index] = 0
+
+    label = label_proximal + 1
+    STRUCT['Proximal RCA'] = label
+    index = np.argwhere(df_numpy[:, 3] == label)
+    branch_label_map[index] = 1
+    branch_parenthood[index] = 0
+
+
     # level 2
 
     if STRUCT['Proximal RCA'] != -1:
-        label = label_proximal + 1
+
+        label = STRUCT['Proximal RCA']
         indx = np.argwhere(df_numpy[:, 3] == label)
 
         start_x_proximal = df_numpy[indx[0], 0]
@@ -599,6 +809,17 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
         if num_neighbour == 2 and (STRUCT['Mid RCA'] == -1 or STRUCT['V'] == -1):
             STRUCT['Mid RCA'] = angle_matrix[index[0], 1].astype('int64')
             STRUCT['V'] = angle_matrix[index[1], 1].astype('int64')
+
+        label = STRUCT['Mid RCA']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 2
+        branch_parenthood[index] = label_proximal + 1
+
+        label = STRUCT['V']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 16
+        branch_parenthood[index] = label_proximal + 1
+
 
     # level 3
 
@@ -659,6 +880,18 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
             STRUCT['AM'] = angle_matrix[index[0], 1].astype('int64')
             STRUCT['Distal RCA'] = angle_matrix[index[1], 1].astype('int64')
 
+        label = STRUCT['AM']
+        parenthood = STRUCT['Mid RCA']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 17
+        branch_parenthood[index] = parenthood
+
+        label = STRUCT['Distal RCA']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 3
+        branch_parenthood[index] = parenthood
+
+
     # level 4
 
     if STRUCT['Distal RCA'] != -1:
@@ -718,9 +951,100 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
             STRUCT['Right PDA'] = angle_matrix[index[0], 1].astype('int64')
             STRUCT['RPD'] = angle_matrix[index[1], 1].astype('int64')
 
+        label = STRUCT['Right PDA']
+        parenthood = STRUCT['Distal RCA']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 4
+        branch_parenthood[index] = parenthood
+
+        label = STRUCT['RPD']
+        index = np.argwhere(df_numpy[:, 3] == label)
+        branch_label_map[index] = 18
+        branch_parenthood[index] = parenthood
+
     print(STRUCT)
 
-    return STRUCT
+    output = np.ones([np.shape(df_numpy)[0], np.shape(df_numpy)[1] + 2])
+    output[:, 0:4] = df_numpy
+    output[:, 4:5] = branch_label_map
+    output[:, 5:6] = branch_parenthood
+
+    csv_file = 'branch_' + csv_file
+    np.savetxt(csv_file, output, delimiter=",")
+
+    # convert to JSON file
+    import json
+
+    # branch_name = 'aorta'
+    # if STRUCT[branch_name] != -1:
+    #     label = list(STRUCT[branch_name][0])
+    #     label = list(map(int, label))
+    #     parenthood = 0
+    #     label_map = 0
+    #     json_string = dict_to_json(branch_name, parenthood, label, label_map, output)
+
+    branch_name = 'Proximal RCA'
+    if STRUCT[branch_name] != -1:
+        parenthood = 0
+        label_map = 1
+        json_string = dict_to_json(branch_name, parenthood, label_map, output)
+        # json_string = json_string + json_string1
+
+    branch_name = 'Mid RCA'
+    if STRUCT[branch_name] != -1:
+        parenthood = 1
+        label_map = 2
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'Distal RCA'
+    if STRUCT[branch_name] != -1:
+        parenthood = 2
+        label_map = 3
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'Right PDA'
+    if STRUCT[branch_name] != -1:
+        parenthood = 3
+        label_map = 4
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'V'
+    if STRUCT[branch_name] != -1:
+        parenthood = 1
+        label_map = 16
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'AM'
+    if STRUCT[branch_name] != -1:
+        parenthood = 2
+        label_map = 17
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    branch_name = 'RPD'
+    if STRUCT[branch_name] != -1:
+        parenthood = 3
+        label_map = 18
+        json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+        json_string = json_string + json_string1
+
+    # for branches without label
+    branch_name = 'unknown'
+    parenthood = -1
+    label_map = -1
+    json_string1 = dict_to_json(branch_name, parenthood, label_map, output)
+    json_string = json_string + json_string1
+
+
+    os.chdir(niftidir)
+    filename = csv_file + '.txt'
+    with open(filename, 'w') as outfile:
+        json.dump(json_string, outfile)
+
 
 def cmpr_preparation(niftidir, niftiroot, dilated_cor_aorta_name, csv_endpoint_file, cx, cy, cz ):
 
@@ -950,37 +1274,33 @@ def main():
     intersect_R = niftiroot_R +'_intersect.nii.gz'
     nib.save(mask, os.path.join(niftidir, intersect_R))
 
-    # # # # # # # # # # branch/sub-branch labeling # # # # # # # # #
-    #
-    # # calculation left side centerline
-    # csv_file_L = centerline_calculation(niftidir, niftiname_L, niftiroot_L, intersect_L)
-    #
-    # # calculation right side centerline
-    # csv_file_R = centerline_calculation(niftidir, niftiname_R, niftiroot_R, intersect_R)
-    #
-    # # calculation of endpoints, co_occurrence matrix and labels near to aorta
-    # # left side
-    # co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, aorta_z = endpoint_calculation\
-    #     (niftidir, np.shape(coronary), csv_file_L, niftiroot_L, intersect_L)
-    #
-    # # labeling branches
-    # # left side
-    # struct = branch_labeling_left(niftidir, csv_file_L, co_occurrence, co_occurrence_inverse,
-    #                               labels_near_aorta, label_proximal, aorta_z)
-    #
-    # # TODO put struct inside the csv file
-    #
-    # # calculation of endpoints, co_occurrence matrix and labels near to aorta
-    # # right side
-    # co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, aorta_z = endpoint_calculation\
-    #     (niftidir, np.shape(coronary), csv_file_R, niftiroot_R, intersect_R)
-    #
-    # # labeling branches
-    # # right side
-    # struct = branch_labeling_right(niftidir, csv_file_R, co_occurrence, co_occurrence_inverse,
-    #                               labels_near_aorta, label_proximal, aorta_z)
-    #
-    # # TODO put struct inside the csv file
+    # # # # # # # # # branch/sub-branch labeling # # # # # # # # #
+
+    # calculation left side centerline
+    csv_file_L = centerline_calculation(niftidir, niftiname_L, niftiroot_L, intersect_L)
+
+    # calculation right side centerline
+    csv_file_R = centerline_calculation(niftidir, niftiname_R, niftiroot_R, intersect_R)
+
+    # calculation of endpoints, co_occurrence matrix and labels near to aorta
+    # left side
+    co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, aorta_z = endpoint_calculation\
+        (niftidir, np.shape(coronary), csv_file_L, niftiroot_L, intersect_L)
+
+    # labeling branches
+    # left side
+    branch_labeling_left(niftidir, csv_file_L, co_occurrence, co_occurrence_inverse,
+                                  labels_near_aorta, label_proximal, aorta_z)
+
+    # calculation of endpoints, co_occurrence matrix and labels near to aorta
+    # right side
+    co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, aorta_z = endpoint_calculation\
+        (niftidir, np.shape(coronary), csv_file_R, niftiroot_R, intersect_R)
+
+    # labeling branches
+    # right side
+    branch_labeling_right(niftidir, csv_file_R, co_occurrence, co_occurrence_inverse,
+                                  labels_near_aorta, label_proximal, aorta_z)
 
     # # # # # # # # # CMPR preparation # # # # # # # # #
     # right
@@ -1015,6 +1335,10 @@ def main():
     csv_file_L = 'centreline_' + niftiroot_L + '.csv'
     csv_endpoint_file = 'endpoint_' + csv_file_L
     cmpr_preparation(niftidir, niftiroot_L, dilated_left_cor_aorta_name, csv_endpoint_file, cx, cy, cz)
+
+    csv_file_R = 'centreline_' + niftiroot_R + '.csv'
+    csv_endpoint_file = 'endpoint_' + csv_file_R
+    cmpr_preparation(niftidir, niftiroot_R, dilated_right_cor_aorta_name, csv_endpoint_file, cx, cy, cz)
 
     toc = time.time()
     print((toc - tic) / 60)
