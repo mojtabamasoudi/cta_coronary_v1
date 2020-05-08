@@ -222,6 +222,8 @@ def endpoint_calculation(niftidir, size_data, csv_file, niftiroot, intersect):
     y = slice_index[0, 1]
     z = slice_index[0, 2]
 
+    intersect_coordinates = np.array([x, y, z])
+
     # euclidean distance
     distance_thresh = 30
     aa = np.array([x, y, z])
@@ -302,14 +304,18 @@ def endpoint_calculation(niftidir, size_data, csv_file, niftiroot, intersect):
     # mask = nib.Nifti1Image(endpoints, img1.affine, img1.header)
     # nib.save(mask, os.path.join(niftidir, centerline_name))
 
-    return co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, z
+    return co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, intersect_coordinates
 
 
-def branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z, degree_angle,
-                                              branch_name, neighbour_name1, neighbour_name2):
+def branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z, intersect_coordinate,
+                     degree_angle, branch_name, neighbour_name1, neighbour_name2):
 
     label = STRUCT[branch_name]
     indx = np.argwhere(df_numpy[:, 3] == label)
+
+    max_indx = indx.size - 1
+    if max_indx > 50:
+        max_indx = 50
 
     start_x_proximal = df_numpy[indx[0], 0]
     start_y_proximal = df_numpy[indx[0], 1]
@@ -319,35 +325,59 @@ def branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, pre
     end_y_proximal = df_numpy[indx[-1], 1]
     end_z_proximal = df_numpy[indx[-1], 2]
 
-    deltaY = end_y_proximal - start_y_proximal
-    deltaX = end_x_proximal - start_x_proximal
-
-    # calculation angle between branches and horizontal axes
-    proximal_angle = atan2(deltaY, deltaX) * 180 / pi
-
+    diff = np.abs(start_z_proximal - end_z_proximal)
     # decision for using co_occurrence or co_occurrence_inverse matrix to calculate neighbour
-    if start_z_proximal == end_z_proximal:
-        xx1 = np.abs(start_x_proximal - 256)
-        yy1 = np.abs(start_y_proximal - 256)
+    if diff <= 3:
+        xx1 = np.abs(start_x_proximal - intersect_coordinate[0])
+        yy1 = np.abs(start_y_proximal - intersect_coordinate[1])
         xy_start = xx1 + yy1
 
-        xx2 = np.abs(end_x_proximal - 256)
-        yy2 = np.abs(end_y_proximal - 256)
+        xx2 = np.abs(end_x_proximal - intersect_coordinate[0])
+        yy2 = np.abs(end_y_proximal - intersect_coordinate[1])
         xy_end = xx2 + yy2
         if xy_start <= xy_end:
             neighbour = np.argwhere(co_occurrence[label, :] == 1)
             previous_z = end_z_proximal
+
+            start_x_proximal = df_numpy[indx[-max_indx], 0]
+            start_y_proximal = df_numpy[indx[-max_indx], 1]
+
+            deltaY = end_y_proximal - start_y_proximal
+            deltaX = end_x_proximal - start_x_proximal
+
         else:
             neighbour = np.argwhere(co_occurrence_inverse[label, :] == 1)
             previous_z = start_z_proximal
+
+            end_x_proximal = df_numpy[indx[max_indx], 0]
+            end_y_proximal = df_numpy[indx[max_indx], 1]
+
+            deltaY = start_y_proximal - end_y_proximal
+            deltaX = start_x_proximal - end_x_proximal
 
     elif (np.abs(end_z_proximal - previous_z) > np.abs(start_z_proximal - previous_z)):
         # finding neighbour of this branch
         neighbour = np.argwhere(co_occurrence[label, :] == 1)
         previous_z = end_z_proximal
+
+        start_x_proximal = df_numpy[indx[-max_indx], 0]
+        start_y_proximal = df_numpy[indx[-max_indx], 1]
+
+        deltaY = end_y_proximal - start_y_proximal
+        deltaX = end_x_proximal - start_x_proximal
+
     else:
         neighbour = np.argwhere(co_occurrence_inverse[label, :] == 1)
         previous_z = start_z_proximal
+
+        end_x_proximal = df_numpy[indx[max_indx], 0]
+        end_y_proximal = df_numpy[indx[max_indx], 1]
+
+        deltaY = start_y_proximal - end_y_proximal
+        deltaX = start_x_proximal - end_x_proximal
+
+    # calculation angle between branches and horizontal axes
+    proximal_angle = atan2(deltaY, deltaX) * 180 / pi
 
     num_neighbour = np.shape(neighbour)[0]
     angle_matrix = np.zeros([num_neighbour, 2])
@@ -358,6 +388,11 @@ def branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, pre
         label = label[0]
         indx = np.argwhere(df_numpy[:, 3] == label)
 
+        max_indx = indx.size - 1
+        if max_indx > 50:
+            max_indx = 50
+
+
         start_x_proximal = df_numpy[indx[0], 0]
         start_y_proximal = df_numpy[indx[0], 1]
         start_z_proximal = df_numpy[indx[0], 2]
@@ -367,9 +402,17 @@ def branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, pre
         end_z_proximal = df_numpy[indx[-1], 2]
 
         if (np.abs(end_z_proximal - previous_z) >= np.abs(start_z_proximal - previous_z)):
+
+            end_x_proximal = df_numpy[indx[max_indx], 0]
+            end_y_proximal = df_numpy[indx[max_indx], 1]
+
             deltaY = end_y_proximal - start_y_proximal
             deltaX = end_x_proximal - start_x_proximal
         else:
+
+            start_x_proximal = df_numpy[indx[-max_indx], 0]
+            start_y_proximal = df_numpy[indx[-max_indx], 1]
+
             deltaY = start_y_proximal - end_y_proximal
             deltaX = start_x_proximal - end_x_proximal
 
@@ -396,7 +439,7 @@ def branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, pre
 
 
 def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal,
-                         aorta_z):
+                         intersect_coordinates):
 
     filename1 = os.path.join(niftidir, csv_file)
     df_numpy = genfromtxt(filename1, delimiter=',')
@@ -422,6 +465,7 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
 
     # proximal
     STRUCT['aorta'] = [labels_near_aorta + 1]
+    aorta_z = intersect_coordinates[2]
     previous_z = aorta_z
 
     # set label zero to all labels near to aorta
@@ -442,101 +486,365 @@ def branch_labeling_left(niftidir, csv_file, co_occurrence, co_occurrence_invers
     branch_name = 'Left main'
     label = STRUCT[branch_name]
     degree_angle = 40
+
+    thresh_add_proximal = 0
+    thresh_add = 0
+    thresh_length = 210000 + thresh_add
+
+    split_add_proximal = 0
+    split_add = 0
+    thresh_length_split = 210000 + split_add
+
+
     if label != -1:
         neighbour_name1 = 'Proximal LAD'
         neighbour_name2 = 'Proximal LCX'
-        previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
-                                              degree_angle, branch_name, neighbour_name1, neighbour_name2)
-        label = STRUCT[neighbour_name1]
-        index = np.argwhere(df_numpy[:, 3] == label)
-        branch_label_map[index] = 6
-        branch_parenthood[index] = label_proximal + 1
+        # measure length
+        direction, previous_z_temp = centerline_direction(df_numpy, label, previous_z)
 
-        label = STRUCT[neighbour_name2]
         index = np.argwhere(df_numpy[:, 3] == label)
-        branch_label_map[index] = 11
-        branch_parenthood[index] = label_proximal + 1
+
+        max_index = index.size - 1
+        if max_index > 50:
+            max_index = 50
+
+        cent_array = df_numpy[index, 0:3]
+        if direction:
+            center_length, num_split = length(cent_array, thresh_length_split)
+        else:
+            cent_array = np.flip(cent_array, 0)
+            center_length, num_split = length(cent_array, thresh_length_split)
+            cent_size = np.shape(cent_array)[0]
+            num_split_inverse = cent_size - num_split - 1
+
+        if num_split > 0:
+            # split centerline
+
+            if direction:
+                start_x_proximal = df_numpy[index[0], 0]
+                start_y_proximal = df_numpy[index[0], 1]
+
+                end_x_proximal = df_numpy[index[num_split], 0]
+                end_y_proximal = df_numpy[index[num_split], 1]
+
+                deltaY = end_y_proximal - start_y_proximal
+                deltaX = end_x_proximal - start_x_proximal
+
+                proximal_angle = atan2(deltaY, deltaX) * 180 / pi
+
+                start_x = df_numpy[index[num_split], 0]
+                start_y = df_numpy[index[num_split], 1]
+
+                end_x = df_numpy[index[num_split + max_index], 0]
+                end_y = df_numpy[index[num_split + max_index], 1]
+
+                deltaY = end_y - start_y
+                deltaX = end_x - start_x
+
+                angle = atan2(deltaY, deltaX) * 180 / pi
+
+                diff_angle = np.abs(proximal_angle - angle)
+
+                if diff_angle <= 51:
+                    STRUCT[neighbour_name1] = label
+                    branch_label_map[index[num_split::]] = 6
+                    branch_parenthood[index[num_split::]] = label_proximal + 1
+                else:
+                    STRUCT[neighbour_name2] = label
+                    branch_label_map[index[num_split::]] = 11
+                    branch_parenthood[index[num_split::]] = label_proximal + 1
+
+            else:
+                start_x_proximal = df_numpy[index[-1], 0]
+                start_y_proximal = df_numpy[index[-1], 1]
+
+                end_x_proximal = df_numpy[index[num_split_inverse], 0]
+                end_y_proximal = df_numpy[index[num_split_inverse], 1]
+
+                deltaY = start_y_proximal - end_y_proximal
+                deltaX = start_x_proximal - end_x_proximal
+
+                proximal_angle = atan2(deltaY, deltaX) * 180 / pi
+
+                start_x = df_numpy[index[num_split_inverse], 0]
+                start_y = df_numpy[index[num_split_inverse], 1]
+
+                end_x = df_numpy[index[num_split_inverse - max_index], 0]
+                end_y = df_numpy[index[num_split_inverse - max_index], 1]
+
+                deltaY = start_y - end_y
+                deltaX = start_x - end_x
+
+                angle = atan2(deltaY, deltaX) * 180 / pi
+
+                diff_angle = np.abs(proximal_angle - angle)
+
+                if diff_angle <= 50:
+                    STRUCT[neighbour_name1] = label
+                    branch_label_map[index[0:num_split_inverse]] = 6
+                    branch_parenthood[index[0:num_split_inverse]] = label_proximal + 1
+                else:
+                    STRUCT[neighbour_name2] = label
+                    branch_label_map[index[0:num_split_inverse]] = 11
+                    branch_parenthood[index[0:num_split_inverse]] = label_proximal + 1
+
+            thresh_add = thresh_add + thresh_length
+            split_add = split_add + thresh_length_split
+
+            thresh_add_proximal = thresh_length
+            split_add_proximal = thresh_length_split
+
+        else:
+            previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
+                                                  intersect_coordinates, degree_angle, branch_name, neighbour_name1,
+                                                  neighbour_name2)
+            thresh_add = 0
+            split_add = 0
+
+            label = STRUCT[neighbour_name1]
+            index = np.argwhere(df_numpy[:, 3] == label)
+            branch_label_map[index] = 6
+            branch_parenthood[index] = label_proximal + 1
+
+            label = STRUCT[neighbour_name2]
+            index = np.argwhere(df_numpy[:, 3] == label)
+            branch_label_map[index] = 11
+            branch_parenthood[index] = label_proximal + 1
 
     # branch 1.1
     branch_name = 'Proximal LCX'
     label = STRUCT[branch_name]
     degree_angle = 40
+
+    thresh_length = 100000 + thresh_add
+    thresh_length_split = 100000 + split_add
+
     if label != -1:
         neighbour_name1 = 'Mid-distal LCX'
         neighbour_name2 = 'First marginal'
-        previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
-                                              degree_angle, branch_name, neighbour_name1, neighbour_name2)
-        label = STRUCT[neighbour_name1]
-        parenthood = STRUCT[branch_name]
-        index = np.argwhere(df_numpy[:, 3] == label)
-        branch_label_map[index] = 13
-        branch_parenthood[index] = parenthood
+        # measure length
+        direction, previous_z_temp = centerline_direction(df_numpy, label, previous_z)
 
-        label = STRUCT[neighbour_name2]
         index = np.argwhere(df_numpy[:, 3] == label)
-        branch_label_map[index] = 12
-        branch_parenthood[index] = parenthood
+        cent_array = df_numpy[index, 0:3]
+        if direction:
+            center_length, num_split = length(cent_array, thresh_length_split)
+        else:
+            cent_array = np.flip(cent_array, 0)
+            center_length, num_split = length(cent_array, thresh_length_split)
+            cent_size = np.shape(cent_array)[0]
+            num_split_inverse = cent_size - num_split - 1
+
+        if num_split > 0:
+            # split centerline
+            STRUCT[neighbour_name1] = label
+
+            if direction:
+                branch_label_map[index[num_split::]] = 13
+                parenthood = STRUCT[branch_name]
+                branch_parenthood[index[num_split::]] = parenthood
+            else:
+                branch_label_map[index[0:num_split_inverse]] = 13
+                parenthood = STRUCT[branch_name]
+                branch_parenthood[index[0:num_split_inverse]] = parenthood
+
+            thresh_add = thresh_add + thresh_length
+            split_add = split_add + thresh_length_split
+
+        else:
+            previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
+                                                  intersect_coordinates, degree_angle, branch_name, neighbour_name1,
+                                                  neighbour_name2)
+            thresh_add = 0
+            split_add = 0
+
+            label = STRUCT[neighbour_name1]
+            parenthood = STRUCT[branch_name]
+            index = np.argwhere(df_numpy[:, 3] == label)
+            branch_label_map[index] = 13
+            branch_parenthood[index] = parenthood
+
+            label = STRUCT[neighbour_name2]
+            index = np.argwhere(df_numpy[:, 3] == label)
+            branch_label_map[index] = 12
+            branch_parenthood[index] = parenthood
 
     # branch 1.2
     branch_name = 'Mid-distal LCX'
     label = STRUCT[branch_name]
     degree_angle = 20
+
+    thresh_length = 439000 + thresh_add
+    thresh_length_split = 439000 + split_add
+
     if label != -1:
         neighbour_name1 = 'Left PDA'
         neighbour_name2 = 'Posterolateral branch'
-        previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
-                                              degree_angle, branch_name, neighbour_name1, neighbour_name2)
-        label = STRUCT[neighbour_name1]
-        parenthood = STRUCT[branch_name]
-        index = np.argwhere(df_numpy[:, 3] == label)
-        branch_label_map[index] = 15
-        branch_parenthood[index] = parenthood
+        # measure length
+        direction, previous_z_temp = centerline_direction(df_numpy, label, previous_z)
 
-        label = STRUCT[neighbour_name2]
         index = np.argwhere(df_numpy[:, 3] == label)
-        branch_label_map[index] = 14
-        branch_parenthood[index] = parenthood
+        cent_array = df_numpy[index, 0:3]
+        if direction:
+            center_length, num_split = length(cent_array, thresh_length_split)
+        else:
+            cent_array = np.flip(cent_array, 0)
+            center_length, num_split = length(cent_array, thresh_length_split)
+            cent_size = np.shape(cent_array)[0]
+            num_split_inverse = cent_size - num_split - 1
+
+        if num_split > 0:
+            # split centerline
+            STRUCT[neighbour_name1] = label
+
+            if direction:
+                branch_label_map[index[num_split::]] = 15
+                parenthood = STRUCT[branch_name]
+                branch_parenthood[index[num_split::]] = parenthood
+            else:
+                branch_label_map[index[0:num_split_inverse]] = 15
+                parenthood = STRUCT[branch_name]
+                branch_parenthood[index[0:num_split_inverse]] = parenthood
+
+            thresh_add = thresh_add + thresh_length
+            split_add = split_add + thresh_length_split
+
+        else:
+            previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
+                                                  intersect_coordinates, degree_angle, branch_name, neighbour_name1,
+                                                  neighbour_name2)
+            thresh_add = 0
+            split_add = 0
+
+            label = STRUCT[neighbour_name1]
+            parenthood = STRUCT[branch_name]
+            index = np.argwhere(df_numpy[:, 3] == label)
+            branch_label_map[index] = 15
+            branch_parenthood[index] = parenthood
+
+            label = STRUCT[neighbour_name2]
+            index = np.argwhere(df_numpy[:, 3] == label)
+            branch_label_map[index] = 14
+            branch_parenthood[index] = parenthood
 
     # branch 2
     branch_name = 'Proximal LAD'
     label = STRUCT[branch_name]
     degree_angle = 20
     previous_z = aorta_z
+
+    thresh_add = thresh_add_proximal
+    split_add = split_add_proximal
+    thresh_length = 154000 + thresh_add
+    thresh_length_split = 154000 + split_add
+
     if label != -1:
         neighbour_name1 = 'Mid LAD'
         neighbour_name2 = 'First Diagonal'
-        previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
-                                              degree_angle, branch_name, neighbour_name1, neighbour_name2)
-        label = STRUCT[neighbour_name1]
-        parenthood = STRUCT[branch_name]
-        index = np.argwhere(df_numpy[:, 3] == label)
-        branch_label_map[index] = 7
-        branch_parenthood[index] = parenthood
+        # measure length
+        direction, previous_z_temp = centerline_direction(df_numpy, label, previous_z)
 
-        label = STRUCT[neighbour_name2]
         index = np.argwhere(df_numpy[:, 3] == label)
-        branch_label_map[index] = 9
-        branch_parenthood[index] = parenthood
+        cent_array = df_numpy[index, 0:3]
+        if direction:
+            center_length, num_split = length(cent_array, thresh_length_split)
+        else:
+            cent_array = np.flip(cent_array, 0)
+            center_length, num_split = length(cent_array, thresh_length_split)
+            cent_size = np.shape(cent_array)[0]
+            num_split_inverse = cent_size - num_split - 1
+
+        if num_split > 0:
+            # split centerline
+            STRUCT[neighbour_name1] = label
+
+            if direction:
+                branch_label_map[index[num_split::]] = 7
+                parenthood = STRUCT[branch_name]
+                branch_parenthood[index[num_split::]] = parenthood
+            else:
+                branch_label_map[index[0:num_split_inverse]] = 7
+                parenthood = STRUCT[branch_name]
+                branch_parenthood[index[0:num_split_inverse]] = parenthood
+
+            thresh_add = thresh_add + thresh_length
+            split_add = split_add + thresh_length_split
+
+        else:
+            previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
+                                                  intersect_coordinates, degree_angle, branch_name, neighbour_name1,
+                                                  neighbour_name2)
+            thresh_add = 0
+            split_add = 0
+
+            label = STRUCT[neighbour_name1]
+            parenthood = STRUCT[branch_name]
+            index = np.argwhere(df_numpy[:, 3] == label)
+            branch_label_map[index] = 7
+            branch_parenthood[index] = parenthood
+
+            label = STRUCT[neighbour_name2]
+            index = np.argwhere(df_numpy[:, 3] == label)
+            branch_label_map[index] = 9
+            branch_parenthood[index] = parenthood
 
     # branch 2.1
     branch_name = 'Mid LAD'
     label = STRUCT[branch_name]
     degree_angle = 40
+
+    thresh_length = 115000 + thresh_add
+    thresh_length_split = 115000 + split_add
+
     if label != -1:
         neighbour_name1 = 'Distal LAD'
         neighbour_name2 = 'Second Diagonal'
-        previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
-                                              degree_angle, branch_name, neighbour_name1, neighbour_name2)
-        label = STRUCT[neighbour_name1]
-        parenthood = STRUCT[branch_name]
-        index = np.argwhere(df_numpy[:, 3] == label)
-        branch_label_map[index] = 10
-        branch_parenthood[index] = parenthood
+        # measure length
+        direction, previous_z_temp = centerline_direction(df_numpy, label, previous_z)
 
-        label = STRUCT[neighbour_name2]
         index = np.argwhere(df_numpy[:, 3] == label)
-        branch_label_map[index] = 8
-        branch_parenthood[index] = parenthood
+        cent_array = df_numpy[index, 0:3]
+        if direction:
+            center_length, num_split = length(cent_array, thresh_length_split)
+        else:
+            cent_array = np.flip(cent_array, 0)
+            center_length, num_split = length(cent_array, thresh_length_split)
+            cent_size = np.shape(cent_array)[0]
+            num_split_inverse = cent_size - num_split - 1
+
+        if num_split > 0:
+            # split centerline
+            STRUCT[neighbour_name1] = label
+
+            if direction:
+                branch_label_map[index[num_split::]] = 8
+                parenthood = STRUCT[branch_name]
+                branch_parenthood[index[num_split::]] = parenthood
+            else:
+                branch_label_map[index[0:num_split_inverse]] = 8
+                parenthood = STRUCT[branch_name]
+                branch_parenthood[index[0:num_split_inverse]] = parenthood
+
+            thresh_add = thresh_add + thresh_length
+            split_add = split_add + thresh_length_split
+
+        else:
+            previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
+                                                  intersect_coordinates, degree_angle, branch_name, neighbour_name1,
+                                                  neighbour_name2)
+            thresh_add = 0
+            split_add = 0
+
+            label = STRUCT[neighbour_name1]
+            parenthood = STRUCT[branch_name]
+            index = np.argwhere(df_numpy[:, 3] == label)
+            branch_label_map[index] = 8
+            branch_parenthood[index] = parenthood
+
+            label = STRUCT[neighbour_name2]
+            index = np.argwhere(df_numpy[:, 3] == label)
+            branch_label_map[index] = 10
+            branch_parenthood[index] = parenthood
 
 
     print(STRUCT)
@@ -686,10 +994,10 @@ def length(cent_array, split_dist):
 
     diff = np.sum(np.abs(cent_array1, cent_array2))
 
-    step = int(np.round(cent_size/20) - 2)
+    step = int(np.round(cent_size/10) - 2)
     num_split = 0
     for i in range(step):
-        indx = i * 20
+        indx = i * 10
         diff_part = np.sum(np.abs(cent_array1[0:indx, :], cent_array2[0:indx, :]))
         if diff_part > split_dist:
             num_split = indx
@@ -716,7 +1024,7 @@ def centerline_direction(df_numpy, label, previous_z):
 
 
 def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal,
-                          aorta_z):
+                          intersect_coordinates):
 
     filename1 = os.path.join(niftidir, csv_file)
     df_numpy = genfromtxt(filename1, delimiter=',')
@@ -738,6 +1046,7 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
 
     # proximal
     STRUCT['aorta'] = [labels_near_aorta + 1]
+    aorta_z = intersect_coordinates[2]
     previous_z = aorta_z
 
     # set label 1 to all labels left main
@@ -780,9 +1089,9 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
             cent_array = np.flip(cent_array, 0)
             center_length, num_split = length(cent_array, thresh_length_split)
             cent_size = np.shape(cent_array)[0]
-            num_split = cent_size - num_split - 1
+            num_split_inverse = cent_size - num_split - 1
 
-        if center_length > thresh_length:
+        if num_split > 0:
             # split centerline
             STRUCT[neighbour_name2] = label
 
@@ -790,15 +1099,16 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
                 branch_label_map[index[num_split::]] = 2
                 branch_parenthood[index[num_split::]] = label_proximal + 1
             else:
-                branch_label_map[index[0:num_split]] = 2
-                branch_parenthood[index[0:num_split]] = label_proximal + 1
+                branch_label_map[index[0:num_split_inverse]] = 2
+                branch_parenthood[index[0:num_split_inverse]] = label_proximal + 1
 
             thresh_add = thresh_add + thresh_length
             split_add = split_add + thresh_length_split
 
         else:
             previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
-                                              degree_angle, branch_name, neighbour_name1, neighbour_name2)
+                                                  intersect_coordinates, degree_angle, branch_name, neighbour_name1,
+                                                  neighbour_name2)
             thresh_add = 0
             split_add = 0
 
@@ -835,9 +1145,9 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
             cent_array = np.flip(cent_array, 0)
             center_length, num_split = length(cent_array, thresh_length_split)
             cent_size = np.shape(cent_array)[0]
-            num_split = cent_size - num_split - 1
+            num_split_inverse = cent_size - num_split - 1
 
-        if center_length > thresh_length:
+        if num_split > 0:
             # split centerline
             STRUCT[neighbour_name1] = label
 
@@ -846,16 +1156,17 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
                 parenthood = STRUCT[branch_name]
                 branch_parenthood[index[num_split::]] = parenthood
             else:
-                branch_label_map[index[0:num_split]] = 3
+                branch_label_map[index[0:num_split_inverse]] = 3
                 parenthood = STRUCT[branch_name]
-                branch_parenthood[index[0:num_split]] = parenthood
+                branch_parenthood[index[0:num_split_inverse]] = parenthood
 
             thresh_add = thresh_add + thresh_length
             split_add = split_add + thresh_length_split
 
         else:
             previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
-                                              degree_angle, branch_name, neighbour_name1, neighbour_name2)
+                                                  intersect_coordinates, degree_angle, branch_name, neighbour_name1,
+                                                  neighbour_name2)
             thresh_add = 0
             split_add = 0
 
@@ -879,8 +1190,8 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
     thresh_length_split = 390000 + split_add
 
     if label != -1:
-        neighbour_name1 = 'Right PDA'
-        neighbour_name2 = 'RPD'
+        neighbour_name1 = 'RPD'
+        neighbour_name2 = 'Right PDA'
 
         # measure length
         direction, previous_z_temp = centerline_direction(df_numpy, label, previous_z)
@@ -893,9 +1204,9 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
             cent_array = np.flip(cent_array, 0)
             center_length, num_split = length(cent_array, thresh_length_split)
             cent_size = np.shape(cent_array)[0]
-            num_split = cent_size - num_split - 1
+            num_split_inverse = cent_size - num_split - 1
 
-        if center_length > thresh_length:
+        if num_split > 0:
             # split centerline
             STRUCT[neighbour_name2] = label
 
@@ -904,27 +1215,28 @@ def branch_labeling_right(niftidir, csv_file, co_occurrence, co_occurrence_inver
                 parenthood = STRUCT[branch_name]
                 branch_parenthood[index[num_split::]] = parenthood
             else:
-                branch_label_map[index[0:num_split]] = 4
+                branch_label_map[index[0:num_split_inverse]] = 4
                 parenthood = STRUCT[branch_name]
-                branch_parenthood[index[0:num_split]] = parenthood
+                branch_parenthood[index[0:num_split_inverse]] = parenthood
             thresh_add = thresh_add + thresh_length
             split_add = split_add + thresh_length_split
 
         else:
             previous_z, STRUCT = branch_neighbour(df_numpy, co_occurrence, co_occurrence_inverse, STRUCT, previous_z,
-                                              degree_angle, branch_name, neighbour_name1, neighbour_name2)
+                                                  intersect_coordinates, degree_angle, branch_name, neighbour_name1,
+                                                  neighbour_name2)
             thresh_add = 0
             split_add = 0
 
             label = STRUCT[neighbour_name1]
             parenthood = STRUCT[branch_name]
             index = np.argwhere(df_numpy[:, 3] == label)
-            branch_label_map[index] = 4
+            branch_label_map[index] = 18
             branch_parenthood[index] = parenthood
 
             label = STRUCT[neighbour_name2]
             index = np.argwhere(df_numpy[:, 3] == label)
-            branch_label_map[index] = 18
+            branch_label_map[index] = 4
             branch_parenthood[index] = parenthood
 
     print(STRUCT)

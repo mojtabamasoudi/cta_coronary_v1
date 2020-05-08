@@ -143,23 +143,23 @@ def main():
 
     # calculation of endpoints, co_occurrence matrix and labels near to aorta
     # left side
-    co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, aorta_z = endpoint_calculation\
+    co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, intersect_coordinates = endpoint_calculation\
         (niftidir, np.shape(coronary), csv_file_L, niftiroot_L, intersect_L)
 
     # labeling branches
     # left side
     branch_labeling_left(niftidir, csv_file_L, co_occurrence, co_occurrence_inverse,
-                                  labels_near_aorta, label_proximal, aorta_z)
+                                  labels_near_aorta, label_proximal, intersect_coordinates)
 
     # calculation of endpoints, co_occurrence matrix and labels near to aorta
-    # right sideq
-    co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, aorta_z = endpoint_calculation\
+    # right side
+    co_occurrence, co_occurrence_inverse, labels_near_aorta, label_proximal, intersect_coordinates = endpoint_calculation\
         (niftidir, np.shape(coronary), csv_file_R, niftiroot_R, intersect_R)
 
     # labeling branches
     # right side
     branch_labeling_right(niftidir, csv_file_R, co_occurrence, co_occurrence_inverse,
-                                  labels_near_aorta, label_proximal, aorta_z)
+                                  labels_near_aorta, label_proximal, intersect_coordinates)
 
     # # # # # # # # # CMPR preparation # # # # # # # # #
     # right
