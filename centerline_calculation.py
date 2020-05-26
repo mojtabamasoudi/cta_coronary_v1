@@ -11,12 +11,13 @@ from numpy import genfromtxt
 from centreline_labelling_tools import *
 
 
+
 def main():
     tic = time.time()
-    niftidir = r'D:\Mojtaba\Dataset_test\dataset02\005_chen_chuanli_ct1570562'
+    niftidir = r'D:\Mojtaba\Dataset_test\dataset02\002_bi_shuying_ct1668532\label_test'
 
     aorta_name = 'aorta.nii.gz'
-    kernel_size = 2  # dilation for connecting aorta and arteries
+    kernel_size = 1  # dilation for connecting aorta and arteries
 
     niftiname = 'coronary.nii.gz'
 
@@ -34,23 +35,36 @@ def main():
     coronary = img1.get_fdata()
     coronary = coronary.astype(np.float64)
 
+    # coronary = np.where(coronary >= 1.5, -1, coronary)
+    # coronary = np.where(coronary >= 1, 2, coronary)
+    # coronary = np.where(coronary <= -1, 1, coronary)
+
     left_cor = np.where(coronary >= 1.5, 1, 0)
 
     # 3d dilation
     kernel = ball(kernel_size)
-    dilated_left_cor = binary_dilation(left_cor, kernel)
-
-    mask = nib.Nifti1Image(dilated_left_cor, img1.affine, img1.header)
-    nib.save(mask, os.path.join(niftidir, niftiname_L))
+    left_cor_dir = os.path.join(niftidir, niftiname_L)
+    if not os.path.exists(left_cor_dir):
+        dilated_left_cor = binary_dilation(left_cor, kernel)
+        mask = nib.Nifti1Image(dilated_left_cor, img1.affine, img1.header)
+        nib.save(mask, os.path.join(niftidir, niftiname_L))
+    else:
+        img1 = nib.load(left_cor_dir)
+        dilated_left_cor = img1.get_fdata()
 
     temp = np.where(coronary >= 1.5, 0, 1)
     right_cor = coronary * temp
 
     # 3d dilation
-    dilated_right_cor = binary_dilation(right_cor, kernel)
 
-    mask = nib.Nifti1Image(dilated_right_cor, img1.affine, img1.header)
-    nib.save(mask, os.path.join(niftidir, niftiname_R))
+    right_cor_dir = os.path.join(niftidir, niftiname_R)
+    if not os.path.exists(right_cor_dir):
+        dilated_right_cor = binary_dilation(right_cor, kernel)
+        mask = nib.Nifti1Image(dilated_right_cor, img1.affine, img1.header)
+        nib.save(mask, os.path.join(niftidir, niftiname_R))
+    else:
+        img1 = nib.load(right_cor_dir)
+        dilated_right_cor = img1.get_fdata()
 
     # generating intersection mask between aorta and right, left side
     # this intersection can be used for opening surface
@@ -59,7 +73,6 @@ def main():
     aorta = img2.get_fdata()
     aorta = aorta > 0
     aorta = aorta.astype(np.float64)
-
 
     kernel_dilation = 11
     kernel = np.ones((kernel_dilation, kernel_dilation), np.uint8)
@@ -95,7 +108,6 @@ def main():
 
         two_surface[x - size_surface:x + (size_surface+1), y - size_surface:y + (size_surface+1),
         z :z + (size_surface+1)] = kernel
-
 
     mask = nib.Nifti1Image(two_surface, img1.affine, img1.header)
 
@@ -163,6 +175,13 @@ def main():
 
     # # # # # # # # # CMPR preparation # # # # # # # # #
     # right
+    kernel_dilation = 7
+    kernel = np.ones((kernel_dilation, kernel_dilation), np.uint8)
+
+    # dilated_right_cor = binary_dilation(right_cor, kernel)
+    right_cor = right_cor.astype('uint8')
+    dilated_right_cor = dilate(right_cor, kernel)
+
     dilated_right_cor_aorta = dilated_right_cor + dilated_aorta
     dilated_right_cor_aorta = dilated_right_cor_aorta > 0
 
@@ -172,6 +191,10 @@ def main():
     nib.save(mask, os.path.join(niftidir, dilated_right_cor_aorta_name))
 
     # left
+    # dilated_left_cor = binary_dilation(left_cor, kernel)
+    left_cor = left_cor.astype('uint8')
+    dilated_left_cor = dilate(left_cor, kernel)
+
     dilated_left_cor_aorta = dilated_left_cor + dilated_aorta
     dilated_left_cor_aorta = dilated_left_cor_aorta > 0
 
